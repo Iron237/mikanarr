@@ -21,7 +21,12 @@ engine = create_engine(
 @event.listens_for(engine, "connect")
 def _set_sqlite_pragma(dbapi_connection, _record) -> None:
     cur = dbapi_connection.cursor()
-    cur.execute("PRAGMA journal_mode=WAL")
+    # 不用 WAL:生产是 Windows Docker 的绑定挂载(./data/mikanarr→/config),WAL 的 -wal/-shm
+    # 依赖 mmap 共享内存,gRPC-FUSE/virtiofs 上不可靠 → 小事务留在 -wal 里,容器重启后丢失
+    # (表现:改完 kind/设置等"成功"但重启回滚)。DELETE 回滚日志无需共享内存,绑定挂载上持久可靠。
+    cur.execute("PRAGMA journal_mode=DELETE")
+    cur.execute("PRAGMA synchronous=FULL")
+    cur.execute("PRAGMA busy_timeout=30000")   # 单写者:写锁竞争时最多等 30s 而非立即 BUSY
     cur.execute("PRAGMA foreign_keys=ON")
     cur.close()
 
