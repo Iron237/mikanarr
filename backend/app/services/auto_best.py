@@ -57,9 +57,13 @@ def _candidate(subgroup_id: str, subgroup_name: str | None, st) -> dict | None:
         return None
     if not _has_pref_sub(st.title):
         return None
+    # 番剧页给的是相对链接(/Download/...torrent)→ 存成绝对 URL
+    url = st.torrent_url
+    if not url.startswith("http"):
+        url = mikan_client.base + "/" + url.lstrip("/")
     return {
         "subgroup_id": subgroup_id, "subgroup_name": subgroup_name,
-        "guid": st.episode_url, "torrent_url": st.torrent_url, "title": st.title,
+        "guid": st.episode_url, "torrent_url": url, "title": st.title,
         "episodes": [int(e) for e in p.episodes if float(e).is_integer()],
         "is_batch": p.is_batch, "source": p.source, "version": p.version,
     }
@@ -98,11 +102,23 @@ def _auto_sub(db: Session, bangumi: Bangumi) -> Subscription:
 
 
 def _submit_candidate(db: Session, sub: Subscription, c: dict) -> bool:
-    """建 Torrent 行 + 关联正片集 + 提交下载器。guid 已存在则跳过。"""
+    """建 Torrent 行 + 关联正片集 + 提交下载器。
+
+    guid 已存在:之前提交失败(SUBMIT_FAILED)的修正 URL 后重试,其余跳过。
+    """
     from app.services.events import emit
     from app.services.rss_engine import _submit
-    if db.execute(select(Torrent.id).where(Torrent.guid == c["guid"])).first():
-        return False
+    existing = db.execute(select(Torrent).where(
+        Torrent.guid == c["guid"])).scalar_one_or_none()
+    if existing is not None:
+        if existing.status != TorrentStatus.SUBMIT_FAILED:
+            return False
+        existing.torrent_url = c["torrent_url"]   # 修正旧的相对/坏 URL
+        existing.status = TorrentStatus.PENDING
+        existing.error_message = None
+        db.flush()
+        _submit(db, sub, existing)
+        return True
     p = parse(c["title"])
     t = Torrent(subscription_id=sub.id, guid=c["guid"], title_raw=c["title"],
                 parsed_json=p.to_dict(), torrent_url=c["torrent_url"],

@@ -184,9 +184,13 @@ class MikanClient:
         return items
 
     def download_torrent(self, torrent_url: str) -> bytes:
-        """qB 容器无代理,.torrent 必须由 app 经代理取回字节再投递(PROBE-NOTES)。"""
+        """qB 容器无代理,.torrent 必须由 app 经代理取回字节再投递(PROBE-NOTES)。
+
+        番剧页解析出的下载链接是相对路径(/Download/...torrent),RSS 的是绝对 URL → 兼容两者。
+        """
+        url = torrent_url if torrent_url.startswith("http") else self.base + "/" + torrent_url.lstrip("/")
         with make_client("mikan") as c:
-            r = c.get(torrent_url)
+            r = c.get(url)
             r.raise_for_status()
             return r.content
 
