@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 import logging
+import re
 import threading
 
 from sqlalchemy import select
@@ -46,6 +47,46 @@ def _has_pref_sub(title: str) -> bool:
     return True
 
 
+_SIZE_RE = re.compile(r"([\d.]+)\s*(TB|GB|MB|KB)", re.I)
+_SIZE_UNIT = {"KB": 1024, "MB": 1024**2, "GB": 1024**3, "TB": 1024**4}
+
+
+def _size_bytes(s: str | None) -> int:
+    m = _SIZE_RE.search(s or "")
+    if not m:
+        return 0
+    try:
+        return int(float(m.group(1)) * _SIZE_UNIT[m.group(2).upper()])
+    except (ValueError, KeyError):
+        return 0
+
+
+def _quality_score(title: str) -> int:
+    """画质评分(越高越优):满足分辨率/字幕后,据编码/色深判优劣。同分再比体积(码率)。"""
+    t = (title or "").lower()
+    score = 0
+    if re.search(r"10\s*-?\s*bit|ma10p|yuv420p10|hi10p?|x265.*10|10bit", t):
+        score += 4                         # 10bit 色深更佳
+    if re.search(r"hevc|x265|h\.?\s?265", t):
+        score += 2                         # HEVC 同码率画质更好
+    elif re.search(r"avc|x264|h\.?\s?264", t):
+        score += 1
+    if re.search(r"flac|tta|\bpcm\b", t):
+        score += 1                         # 无损音轨(BD 常见)
+    return score
+
+
+_PUB_RE = re.compile(r"(\d{4})[/\-年.](\d{1,2})[/\-月.](\d{1,2})")
+
+
+def _pub_ord(published: str | None) -> int:
+    """发布时间 → 可排序整数(YYYYMMDD)。蜜柑不给做种数,用发布越新≈种子越活作可用性代理。"""
+    m = _PUB_RE.search(published or "")
+    if not m:
+        return 0
+    return int(m.group(1)) * 10000 + int(m.group(2)) * 100 + int(m.group(3))
+
+
 def _candidate(subgroup_id: str, subgroup_name: str | None, st) -> dict | None:
     """字幕组种子 → 候选(严格过滤:分辨率必须等于目标 + 含偏好字幕);不合格返回 None。"""
     if not st.torrent_url:
@@ -66,6 +107,8 @@ def _candidate(subgroup_id: str, subgroup_name: str | None, st) -> dict | None:
         "guid": st.episode_url, "torrent_url": url, "title": st.title,
         "episodes": [int(e) for e in p.episodes if float(e).is_integer()],
         "is_batch": p.is_batch, "source": p.source, "version": p.version,
+        "quality": _quality_score(st.title), "size": _size_bytes(getattr(st, "size", None)),
+        "pub": _pub_ord(getattr(st, "published", None)),
     }
 
 
@@ -193,11 +236,13 @@ def scan_bangumi(db: Session, bangumi: Bangumi, do_fill: bool = True,
         return {"bangumi": bangumi.id, "title": bangumi.title, "candidates": len(cands),
                 "submitted": 0, "note": "已是最佳,无需下载"}
 
-    # 贪心选种:优先 BD、合集(覆盖广)、高版本;逐个吃掉待办集
+    # 画质关卡 + 可用性 + 贪心选种:每集挑最优种子。排序优先级:
+    # 片源(BD>Web>未知)→ 画质分(10bit/HEVC/无损)→ 可用性(发布越新种子越活,减少死种)
+    # → 版本 → 合集(同优先覆盖广)→ 体积(码率)。死种仍有「坏种自动换源」兜底。
     remaining = set(needed)
     selected: list[dict] = []
-    for c in sorted(cands, key=lambda c: (_source_rank(c["source"]),
-                                          not c["is_batch"], -c["version"])):
+    for c in sorted(cands, key=lambda c: (_source_rank(c["source"]), -c["quality"], -c["pub"],
+                                          -c["version"], not c["is_batch"], -c["size"])):
         cover = remaining & set(c["episodes"])
         if cover:
             selected.append(c)
@@ -211,7 +256,11 @@ def scan_bangumi(db: Session, bangumi: Bangumi, do_fill: bool = True,
     log.info("智能扫描 %s:候选 %s,补/升 %s 集,提交 %s 个种子",
              bangumi.title, len(cands), len(needed), submitted)
     return {"bangumi": bangumi.id, "title": bangumi.title, "candidates": len(cands),
-            "needed": sorted(needed), "submitted": submitted}
+            "needed": sorted(needed), "submitted": submitted,
+            # 进度列表用:本次选中的种子(画质标签 + 集范围),展示「进入下载前」挑了什么
+            "picked": [{"title": c["title"][:80], "source": c["source"],
+                        "quality": c["quality"], "episodes": sorted(c["episodes"])[:3],
+                        "ep_count": len(c["episodes"])} for c in selected]}
 
 
 def run_scan(bangumi_ids: list[int], do_fill: bool = True, do_upgrade: bool = True) -> None:

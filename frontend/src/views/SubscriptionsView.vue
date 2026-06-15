@@ -17,6 +17,11 @@ const importStatus = ref(null)
 const importError = ref('')
 const showImportAll = ref(false)
 const cookieInput = ref('')
+const sinceYear = ref('')
+const sinceSeason = ref('')
+const untilYear = ref('')
+const untilSeason = ref('')
+const importAllAutoDl = ref(false)
 const allStatus = ref(null)
 const allError = ref('')
 let allTimer = null
@@ -61,7 +66,12 @@ async function doDelete() {
 async function startImportAll() {
   allError.value = ''
   try {
-    await api.post('/api/import/mikan-all', { cookie: cookieInput.value.trim() })
+    await api.post('/api/import/mikan-all', {
+      cookie: cookieInput.value.trim(),
+      since_year: sinceYear.value || null, since_season: sinceSeason.value || '',
+      until_year: untilYear.value || null, until_season: untilSeason.value || '',
+      auto_download: importAllAutoDl.value,
+    })
     pollImportAll()
   } catch (e) { allError.value = e.message }
 }
@@ -166,15 +176,31 @@ onUnmounted(() => { clearTimeout(pollTimer); clearTimeout(allTimer) })
       <div class="modal" style="width: 580px;">
         <h3 style="margin-bottom: 8px;">导入蜜柑全部订阅到番剧库(含历史季度)</h3>
         <p class="muted" style="font-size: 12.5px; margin-bottom: 12px;">
-          用你的蜜柑登录 cookie 抓「我的番组」,遍历**所有季度**,把订阅过的番剧
-          <strong>只加入番剧库</strong>(补元数据,已在库的跳过)——<strong>不建 RSS 订阅、不下载</strong>。
-          想追更新的番剧,之后在番剧库/订阅页手动选字幕组和画质再订阅。
+          用你的蜜柑登录 cookie 抓「我的番组」,遍历季度(可用下方<strong>年份范围</strong>限定),
+          把订阅过的番剧加入番剧库(补元数据,已在库的跳过)。默认<strong>只入库不下载</strong>;
+          需要的话勾选下方在入库后<strong>智能下载补齐</strong>。
           cookie 会存进设置(打码),过期后重新粘贴即可。<br>
           取法:登录 mikanani.me → F12 → 网络 → 任意请求的 <code>Cookie</code> 整行;
           或 应用→Cookies 里 <code>.AspNetCore.Identity.Application</code> 的值。
         </p>
         <textarea v-model="cookieInput" class="input" rows="3"
                   placeholder="粘贴 cookie(留空则用已保存的)"></textarea>
+        <div class="row" style="margin-top: 10px; gap: 6px; flex-wrap: wrap; align-items: center;">
+          <span class="muted" style="font-size: 12.5px;">时间范围(季度,留空=全部)</span>
+          <input v-model="sinceYear" type="number" class="input" style="width: 80px;" placeholder="起始年" />
+          <select v-model="sinceSeason" class="input" style="width: 64px;">
+            <option value="">季</option><option>冬</option><option>春</option><option>夏</option><option>秋</option>
+          </select>
+          <span class="muted">~</span>
+          <input v-model="untilYear" type="number" class="input" style="width: 80px;" placeholder="结束年" />
+          <select v-model="untilSeason" class="input" style="width: 64px;">
+            <option value="">季</option><option>冬</option><option>春</option><option>夏</option><option>秋</option>
+          </select>
+        </div>
+        <label class="row" style="margin-top: 10px; cursor: pointer; font-size: 12.5px; gap: 6px;">
+          <input type="checkbox" v-model="importAllAutoDl" />
+          导入后对范围内新番剧<b>智能下载补齐</b>(按画质关卡挑最优源,进度见番剧库)
+        </label>
         <p v-if="allError" style="color: var(--red); font-size: 12.5px; margin-top: 8px;">{{ allError }}</p>
         <div v-if="allStatus" class="card" style="margin: 10px 0; padding: 12px; font-size: 12.5px;">
           <div>{{ allStatus.running ? allStatus.phase + '…' : '完成' }}

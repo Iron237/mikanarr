@@ -210,6 +210,28 @@ onUnmounted(() => { mounted = false; clearTimeout(scanTimer); clearTimeout(autoT
       </template>
     </div>
 
+    <!-- 智能下载进度列表:展示「进入下载任务前」每部挑了什么源 -->
+    <div v-if="autoScan && !autoScan.error && (autoScan.result?.length || autoScan.running)" class="auto-list card">
+      <div v-for="(r, i) in autoScan.result" :key="i" class="auto-row">
+        <div class="row" style="gap: 8px; flex-wrap: wrap; align-items: baseline;">
+          <strong>{{ r.title }}</strong>
+          <span v-if="r.submitted" class="tag green">提交 {{ r.submitted }}</span>
+          <span v-else-if="r.error" class="tag red">出错</span>
+          <span v-else class="tag">{{ r.note || '—' }}</span>
+          <span v-if="r.candidates" class="muted" style="font-size: 11.5px;">候选 {{ r.candidates }} · 待补/升 {{ r.needed?.length || 0 }}</span>
+        </div>
+        <div v-for="(p, j) in (r.picked || [])" :key="j" class="picked-row">
+          <span class="tag" :class="p.source === 'BD' ? 'accent' : ''">{{ p.source || '?' }}</span>
+          <span v-if="p.quality" class="tag" title="画质分(10bit/HEVC/无损)">画质{{ p.quality }}</span>
+          <span class="ep">{{ p.ep_count > 1 ? `${p.episodes[0]}…共${p.ep_count}集` : ('第' + (p.episodes[0] ?? '?') + '话') }}</span>
+          <span class="ptitle muted" :title="p.title">{{ p.title }}</span>
+        </div>
+      </div>
+      <div v-if="autoScan.running && autoScan.current" class="muted" style="font-size: 12px;">
+        <Icon name="zap" :size="12" /> 正在扫描:{{ autoScan.current }}…
+      </div>
+    </div>
+
     <div v-if="loading" class="muted">加载中…</div>
     <div v-else-if="!groups.length" class="empty card">
       {{ keyword ? '没有匹配的番剧' : '番剧库还是空的 — 去订阅管理添加第一部番剧吧' }}
@@ -323,6 +345,14 @@ onUnmounted(() => { mounted = false; clearTimeout(scanTimer); clearTimeout(autoT
   display: flex; align-items: center; gap: 8px; padding: 9px 16px; margin-bottom: 16px;
   font-size: 12.5px; border-color: var(--accent-dim); flex-wrap: wrap;
 }
+.auto-list { padding: 10px 16px; margin-bottom: 16px; max-height: 40vh; overflow-y: auto;
+  display: flex; flex-direction: column; gap: 10px; }
+.auto-row { border-bottom: 1px solid var(--border); padding-bottom: 8px; }
+.auto-row:last-child { border-bottom: none; padding-bottom: 0; }
+.picked-row { display: flex; align-items: center; gap: 6px; font-size: 11.5px;
+  margin-top: 4px; padding-left: 10px; }
+.picked-row .ep { color: var(--accent); flex-shrink: 0; }
+.picked-row .ptitle { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .poster { position: relative; aspect-ratio: 5/7; background: #0b0e14; }
 .poster img { width: 100%; height: 100%; object-fit: cover; display: block; }
 .poster-fallback {

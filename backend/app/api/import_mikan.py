@@ -109,7 +109,18 @@ def import_mikan_all(payload: dict):
     cookie = (payload.get("cookie") or "").strip() or None
     if not cookie and not settings.mikan_cookie:
         raise HTTPException(400, "请提供蜜柑登录 cookie")
-    mfi.start(cookie)
+
+    def _year(v):
+        try:
+            return int(v) if v not in (None, "") else None
+        except (TypeError, ValueError):
+            return None
+    mfi.start(cookie,
+              since_year=_year(payload.get("since_year")),
+              since_season=(payload.get("since_season") or ""),
+              until_year=_year(payload.get("until_year")),
+              until_season=(payload.get("until_season") or ""),
+              auto_dl=bool(payload.get("auto_download")))
     return {"started": True}
 
 

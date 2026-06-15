@@ -26,6 +26,22 @@ state = {"running": False, "phase": "", "done": 0, "total": 0,
 _QUARTER_RE = re.compile(r'data-year="(\d+)"\s+data-season="([^"]+)"')
 _BANGUMI_ID_RE = re.compile(r"/Home/Bangumi/(\d+)")
 
+# 季度时序排名:冬(1-3月)<春<夏<秋,据此把 (年,季) 映射成可比键 年*10+季
+_SEASON_RANK = {"冬": 1, "春": 2, "夏": 3, "秋": 4,
+                "winter": 1, "spring": 2, "summer": 3, "fall": 4, "autumn": 4}
+
+
+def _season_rank(s: str | None) -> int:
+    s = (s or "").strip()
+    return _SEASON_RANK.get(s) or _SEASON_RANK.get(s.lower(), 0)
+
+
+def _quarter_key(year, season) -> int:
+    try:
+        return int(year) * 10 + _season_rank(season)
+    except (TypeError, ValueError):
+        return 0
+
 
 def _parse_cookie(raw: str) -> dict:
     """支持粘贴完整 Cookie 头(name=value; …)或仅 .AspNetCore.Identity.Application 的值。"""
@@ -51,7 +67,8 @@ def _client() -> httpx.Client:
         cookies=_parse_cookie(settings.mikan_cookie), follow_redirects=True)
 
 
-def _collect_subscribed_ids(c: httpx.Client) -> list[int]:
+def _collect_subscribed_ids(c: httpx.Client, since_key: int | None = None,
+                            until_key: int | None = None) -> list[int]:
     base = settings.mikan_base_url.rstrip("/")
     r = c.get(base + "/Home/MyBangumi")
     # 蜜柑页面把中文做了 HTML 实体编码(&#x6211;…),先 unescape 再判标记
@@ -61,9 +78,13 @@ def _collect_subscribed_ids(c: httpx.Client) -> list[int]:
     seen_q, quarters = set(), []
     for y, s in _QUARTER_RE.findall(r.text):
         s = _html.unescape(s)
-        if (y, s) not in seen_q:
-            seen_q.add((y, s))
-            quarters.append((y, s))
+        if (y, s) in seen_q:
+            continue
+        qk = _quarter_key(y, s)                 # 时间范围筛选:季度键落在 [since, until] 内
+        if qk and ((since_key and qk < since_key) or (until_key and qk > until_key)):
+            continue
+        seen_q.add((y, s))
+        quarters.append((y, s))
     state.update(phase="遍历季度", total=len(quarters), done=0)
     ids: dict[int, None] = {}
     for idx, (y, s) in enumerate(quarters, 1):
@@ -77,9 +98,9 @@ def _collect_subscribed_ids(c: httpx.Client) -> list[int]:
     return list(ids)
 
 
-def _import_bangumi(mid: int) -> str | None:
+def _import_bangumi(mid: int) -> tuple[int, str] | None:
     """只把番剧加入番剧库(建 Bangumi + 补元数据 + 续作季号);不建 RSS 订阅、不下载。
-    已在库中返回 None(跳过)。RSS 订阅由用户后续手动选择字幕组/画质再建。"""
+    返回 (bangumi_id, title);已在库中返回 None(跳过)。RSS/下载由用户后续或 auto_dl 处理。"""
     from app.clients.mikan import mikan_client
     from app.services.metadata_service import enrich_bangumi
     from app.services.organize import detect_season
@@ -95,25 +116,28 @@ def _import_bangumi(mid: int) -> str | None:
         db.flush()
         enrich_bangumi(db, bangumi)
         bangumi.season_number = detect_season(bangumi.title)
-        return bangumi.title
+        return bangumi.id, bangumi.title
 
 
-def _run(cookie: str | None) -> None:
+def _run(cookie: str | None, since_key: int | None, until_key: int | None,
+         auto_dl: bool) -> None:
     if cookie:
         from app.services import settings_service
         settings_service.update({"mikan_cookie": cookie})
     state.update(running=True, phase="读取我的番组", done=0, total=0,
                  created=[], skipped=0, errors=0, error=None)
+    created_ids: list[int] = []
     try:
         with _client() as c:
-            ids = _collect_subscribed_ids(c)
+            ids = _collect_subscribed_ids(c, since_key, until_key)
         state.update(phase="加入番剧库", done=0, total=len(ids))
         for idx, mid in enumerate(ids, 1):
             state["done"] = idx
             try:
-                desc = _import_bangumi(mid)
-                if desc:
-                    state["created"].append(desc)
+                res = _import_bangumi(mid)
+                if res:
+                    created_ids.append(res[0])
+                    state["created"].append(res[1])
                 else:
                     state["skipped"] += 1
             except Exception as e:  # noqa: BLE001
@@ -121,14 +145,27 @@ def _run(cookie: str | None) -> None:
                 state["errors"] += 1
         log.info("蜜柑全量导入完成:新建 %s,跳过 %s,失败 %s",
                  len(state["created"]), state["skipped"], state["errors"])
+        # 入库后可选「智能下载」补齐(用画质关卡挑最优源);仅对本次新建的番剧
+        if auto_dl and created_ids:
+            from app.services import auto_best
+            if auto_best.start_scan(created_ids):
+                state["phase"] = f"已触发智能下载({len(created_ids)} 部)"
+                log.info("蜜柑导入后触发智能下载:%s 部", len(created_ids))
     except Exception as e:  # noqa: BLE001
         state["error"] = str(e)
         log.exception("蜜柑全量导入失败")
     finally:
-        state.update(running=False, phase="完成")
+        state.update(running=False)
+        if not state["phase"].startswith("已触发"):
+            state["phase"] = "完成"
 
 
-def start(cookie: str | None) -> None:
+def start(cookie: str | None, since_year=None, since_season="", until_year=None,
+          until_season="", auto_dl: bool = False) -> None:
     if state["running"]:
         return
-    threading.Thread(target=_run, args=(cookie,), daemon=True).start()
+    # 季度边界 → 可比键。下界无季 → 该年初(含全年);上界无季 → 该年末(rank 9,含全年)
+    since_key = (int(since_year) * 10 + _season_rank(since_season)) if since_year else None
+    until_key = (int(until_year) * 10 + (_season_rank(until_season) or 9)) if until_year else None
+    threading.Thread(target=_run, args=(cookie, since_key, until_key, auto_dl),
+                     daemon=True).start()
