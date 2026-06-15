@@ -20,7 +20,7 @@ from sqlalchemy import select
 
 from app.config import settings
 from app.database import db_session
-from app.models import (Bangumi, Episode, EpisodeType, Subscription, Torrent,
+from app.models import (Bangumi, Episode, EpisodeType, Kind, Subscription, Torrent,
                         TorrentEpisode, TorrentStatus, VideoFile)
 from app.parsers.title_parser import parse
 from app.services import media_probe
@@ -278,7 +278,8 @@ def _import_group(group: dict) -> str:
             p = parse(src.name)
             vf.subgroup = p.group
             vf.source = p.source
-            if len(p.episodes) == 1:
+            # 影片/OVA 不归正片集(留作「影片本体」);仅 TV 番剧按集映射
+            if bangumi.kind == Kind.TV and len(p.episodes) == 1:
                 n = p.episodes[0]
                 ep = db.execute(select(Episode).where(
                     Episode.bangumi_id == bangumi.id, Episode.type == EpisodeType.REGULAR,

@@ -23,7 +23,7 @@ from sqlalchemy import or_, select
 
 from app.config import settings
 from app.database import db_session
-from app.models import (Bangumi, Episode, EpisodeType, Subscription, Torrent,
+from app.models import (Bangumi, Episode, EpisodeType, Kind, Subscription, Torrent,
                         TorrentEpisode, TorrentStatus, VideoFile)
 from app.parsers.title_parser import detect_source, parse
 from app.services import media_probe
@@ -115,6 +115,8 @@ def _container_torrent(db, b: Bangumi) -> Torrent:
 
 def _map_episode(db, b: Bangumi, t: Torrent, p) -> int | None:
     """解析结果 → episode_id(+ TorrentEpisode)。按 ep_type 归类,非正片不占正片集号。"""
+    if b.kind != Kind.TV:
+        return None       # 影片/OVA:不归集,文件留作「影片本体」
     ep_type = (EpisodeType(p.ep_type)
                if p.ep_type in EpisodeType._value2member_map_ else EpisodeType.REGULAR)
     if ep_type == EpisodeType.REGULAR:

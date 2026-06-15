@@ -17,8 +17,8 @@ from sqlalchemy.orm import Session
 from app.clients.downloader import downloader
 from app.config import settings
 from app.database import db_session
-from app.models import (Episode, EpisodeType, Torrent, TorrentEpisode, TorrentStatus,
-                        VideoFile)
+from app.models import (Episode, EpisodeType, Kind, Torrent, TorrentEpisode,
+                        TorrentStatus, VideoFile)
 from app.parsers.title_parser import parse
 from app.services import media_probe
 
@@ -36,13 +36,16 @@ def _match_episode(db: Session, t: Torrent, filename: str) -> int | None:
 
     剧集类型(正片/OP·ED/SP/PV…)由解析器判定:非正片不占用正片集号(独立 type)。
     """
+    sub = t.subscription
+    # 影片/OVA:不归正片集,文件留作「影片本体」(避免剧场版被当成第 1 话)
+    if sub and sub.bangumi and sub.bangumi.kind != Kind.TV:
+        return None
     linked = db.execute(select(TorrentEpisode.episode_id).where(
         TorrentEpisode.torrent_id == t.id)).scalars().all()
     if len(linked) == 1 and not t.is_batch:
         return linked[0]
 
     parsed = parse(filename)
-    sub = t.subscription
     ep_type = (EpisodeType(parsed.ep_type)
                if parsed.ep_type in EpisodeType._value2member_map_ else EpisodeType.REGULAR)
 

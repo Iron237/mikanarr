@@ -85,7 +85,8 @@ _EP_CREDITS = re.compile(
 _EP_TRAILER = re.compile(r"\bPV\d*\b|\bCM\d*\b|Trailer|Teaser|预告|預告|\bPreview\b", re.I)
 # 强特典标记:整条发布本身就是特典单元(数字是它自身序号,不是正片集号)
 _EP_SPECIAL_STRONG = re.compile(
-    r"\bSP\d{0,2}\b|\[\s*SP\s*\]|\bOVA\d*\b|\bOAD\d*\b|OAV|剧场版|劇場版|\bMovie\b|\bSpecial\b", re.I)
+    r"\bSP\d{0,2}\b|\[\s*SP\s*\]|\bOVA\d*\b|\bOAD\d*\b|OAV|剧场版|劇場版|映画|\bEiga\b|"
+    r"\bGekijou?ban\b|电影|\bMovie\b|\bSpecial\b", re.I)
 # 弱特典描述:可能只是修饰某一正片集(如哆啦A梦「[109]…特别篇…」仍是正片第 109 话)
 _EP_SPECIAL_WEAK = re.compile(r"特别篇|特別篇|特典|番外|总集篇|總集篇|映像特典", re.I)
 # 剧场版/Movie 在番剧内无正片集号 → 归 SPECIAL(番剧整体形态另由 Bangumi.kind 表达)
