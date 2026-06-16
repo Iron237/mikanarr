@@ -13,9 +13,13 @@
 
 ## 部署(Docker)
 
+**一键部署**(Windows Docker Desktop 双击 `deploy.bat`;Linux 跑 `./deploy.sh`)与三种部署场景详见 **[DEPLOY.md](DEPLOY.md)**。手动:
+
 ```bash
 cp .env.example .env   # 填 NAS SMB、代理、TMDB key
 docker compose up -d --build
+# 在 NAS/本地盘直接跑(本地绑定挂载):
+# docker compose -f docker-compose.yml -f docker-compose.local.yml up -d --build
 ```
 
 - WebUI: http://localhost:8008
