@@ -25,6 +25,8 @@ IDLE_INTERVAL = 10
 # (pausedDL/stoppedDL 不在内 → 无进度暂停的任务保持暂停,不被自愈打回)
 _RECOVER_DL_STATES = {"downloading", "stalledDL", "metaDL", "forcedDL", "forcedMetaDL",
                       "queuedDL", "checkingDL", "allocating"}
+# 用户/qB 主动暂停的状态:不能按「坏种/无进度」处理(否则人工暂停的种子会被自动删除丢数据)
+_PAUSED_STATES = {"pausedDL", "stoppedDL", "pausedUP", "stoppedUP"}
 
 
 class WsManager:
@@ -157,6 +159,10 @@ def _sync_once() -> tuple[list[dict], bool]:
                     log.info("下载完成 #%s %s", t.id, t.title_raw[:50])
                     _emit("on_complete", t)
                     to_enqueue.append(t.id)
+                elif lt.state in _PAUSED_STATES:
+                    # 人工/qB 暂停:既非坏种也非无进度,清计时(防恢复后被立即误删),本轮不算活动
+                    t.stalled_since = None
+                    t.progress_at = None
                 elif _check_stall(db, t, lt):
                     pass            # 无进度已自动暂停
                 elif _check_dead(db, t, lt):

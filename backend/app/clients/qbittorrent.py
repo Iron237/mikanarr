@@ -30,12 +30,13 @@ class QbClient:
     def client(self) -> qbittorrentapi.Client:
         with self._lock:
             if self._client is None:
-                self._client = qbittorrentapi.Client(
+                c = qbittorrentapi.Client(
                     host=settings.qb_host, port=settings.qb_port,
                     username=settings.qb_username, password=settings.qb_password,
                     REQUESTS_ARGS={"timeout": 15},
                 )
-                self._client.auth_log_in()
+                c.auth_log_in()          # 登录成功后才提升为单例;失败不留下未认证的坏客户端
+                self._client = c
             return self._client
 
     def healthy(self) -> dict:

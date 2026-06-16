@@ -19,7 +19,13 @@ _CACHE_DIR = settings.data_dir / "images" / "mikan-cache"
 
 @router.get("")
 def search(keyword: str):
-    results = mikan_client.search(keyword)
+    if not keyword.strip():
+        raise HTTPException(400, "keyword 不能为空")
+    try:
+        results = mikan_client.search(keyword)
+    except Exception as e:  # noqa: BLE001 — Mikan 不可达/解析失败 → 502 而非 500
+        log.warning("搜索失败 kw=%s: %s", keyword, e)
+        raise HTTPException(502, f"Mikan 搜索失败:{e}") from e
     return [{"mikan_bangumi_id": r.mikan_bangumi_id, "title": r.title,
              "cover": f"/api/search/cover?path={r.cover_url}" if r.cover_url else None}
             for r in results]
@@ -114,7 +120,11 @@ def multi_search(source: str, keyword: str = "", bangumi_id: int | None = None):
 @router.get("/bangumi/{mikan_bangumi_id}")
 def bangumi_detail(mikan_bangumi_id: int):
     """番剧页:字幕组列表 + 各组最近发布(向导选组依据)+ bgm.tv 关联。"""
-    d = mikan_client.get_bangumi(mikan_bangumi_id)
+    try:
+        d = mikan_client.get_bangumi(mikan_bangumi_id)
+    except Exception as e:  # noqa: BLE001 — HTML 结构变化/番剧页缺失 → 502 而非 500
+        log.warning("番剧页解析失败 id=%s: %s", mikan_bangumi_id, e)
+        raise HTTPException(502, f"Mikan 番剧页获取失败:{e}") from e
     return {
         "mikan_bangumi_id": d.mikan_bangumi_id,
         "title": d.title,

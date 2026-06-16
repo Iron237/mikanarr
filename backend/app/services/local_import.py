@@ -20,8 +20,7 @@ from sqlalchemy import select
 
 from app.config import settings
 from app.database import db_session
-from app.models import (Bangumi, Episode, EpisodeType, Kind, Subscription, Torrent,
-                        TorrentEpisode, TorrentStatus, VideoFile)
+from app.models import Bangumi, Subscription, Torrent, TorrentStatus, VideoFile
 from app.parsers.title_parser import parse
 from app.services import media_probe
 

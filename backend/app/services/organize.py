@@ -127,7 +127,9 @@ def _write_nfo(b, folder: Path) -> None:
         lines.append(f"  <originaltitle>{escape(b.title_original)}</originaltitle>")
     if b.year:
         lines.append(f"  <year>{b.year}</year>")
-        lines.append(f"  <premiered>{b.year}-01-01</premiered>")
+    premiered = getattr(b, "air_date", None) or (f"{b.year}-01-01" if b.year else None)
+    if premiered:
+        lines.append(f"  <premiered>{escape(premiered)}</premiered>")
     if b.summary:
         lines.append(f"  <plot>{escape(b.summary)}</plot>")
     if b.studio:

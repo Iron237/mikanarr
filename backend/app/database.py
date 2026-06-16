@@ -75,6 +75,7 @@ def _migrate_columns() -> None:
                          ("last_poll_ok", "BOOLEAN DEFAULT 1"),
                          ("last_poll_error", "TEXT")],
         "bangumi": [("air_weekday", "INTEGER"),
+                    ("air_date", "VARCHAR(32)"),
                     ("season_number", "INTEGER DEFAULT 1"),
                     ("anidb_aid", "INTEGER"),
                     ("anidb_synced_at", "DATETIME"),

@@ -251,6 +251,7 @@ def _run() -> None:
                         continue
                     t = _container_torrent(db, b)
                     n = upd = 0
+                    touched_eps: set[int] = set()
                     for vp in vids:
                         rel = str(vp.relative_to(root)).replace("\\", "/")
                         # 逐文件再看其所在子目录(如 .../SPs/、.../BDRip/)叠加上下文片源
@@ -261,6 +262,12 @@ def _run() -> None:
                                 n += 1
                             elif r == "updated":
                                 upd += 1
+                            if r in ("added", "updated"):   # 仅本轮变动的集需重算 active
+                                eid = db.execute(select(VideoFile.episode_id).where(
+                                    VideoFile.torrent_id == t.id,
+                                    VideoFile.relative_path == rel)).scalar()
+                                if eid:
+                                    touched_eps.add(eid)
                         except Exception as e:  # noqa: BLE001 — 单文件失败不拖垮整夹
                             log.warning("库扫描登记失败 %s: %s", vp, e)
                     state["registered"] += n
@@ -270,9 +277,7 @@ def _run() -> None:
                             f"{b.title}: +{n}" + (f" ~{upd}" if upd else ""))
                         # 新增/更新文件后重算受影响集的 active,保证每集唯一最优(防多 active)
                         from app.services.postprocess import _apply_version_switch
-                        for ep_id in set(db.execute(select(VideoFile.episode_id).where(
-                                VideoFile.torrent_id == t.id,
-                                VideoFile.episode_id.isnot(None))).scalars()):
+                        for ep_id in touched_eps:
                             _apply_version_switch(db, ep_id)
             except Exception as e:  # noqa: BLE001
                 log.warning("库扫描处理 %s 失败: %s", folder.name, e)

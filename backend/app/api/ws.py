@@ -13,4 +13,8 @@ async def progress(ws: WebSocket):
         while True:
             await ws.receive_text()   # 心跳/忽略客户端消息
     except WebSocketDisconnect:
+        pass
+    finally:
+        # finally 兜底:非正常断开(ConnectionReset 等)也要摘除,否则死连接堆积
+        # (空闲无下载时不广播 → 永不触发 send 失败的自愈)
         await ws_manager.disconnect(ws)

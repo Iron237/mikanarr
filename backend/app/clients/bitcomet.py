@@ -86,8 +86,11 @@ class BitCometClient:
             token = self._ensure_token()
             with self._http as c:
                 r = c.post(path, json=body, headers={"Authorization": "Bearer " + token})
-            if r.status_code == 401 or (r.headers.get("content-type", "").startswith("application/json")
-                                        and r.json().get("error_code") == "INVALID_TOKEN"):
+            try:   # 重启中/反代可能回 content-type=json 但 body 是 HTML → json() 抛错
+                jb = r.json() if r.headers.get("content-type", "").startswith("application/json") else {}
+            except ValueError:
+                jb = {}
+            if r.status_code == 401 or jb.get("error_code") == "INVALID_TOKEN":
                 with self._lock:
                     self._token = None
                 if attempt == 0:

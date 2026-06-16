@@ -94,11 +94,12 @@ def batch(payload: dict, db: Session = Depends(get_db)):
                 t.error_message = "手动删除"
             elif t.info_hash:               # pause/resume 仅对已提交任务有意义
                 (downloader.pause if action == "pause" else downloader.resume)(t.info_hash)
+                # 暂停/恢复都清计时:暂停期间不积累坏种/无进度判定,恢复后重新计
+                t.stalled_since = None
+                t.progress_at = None
                 if action == "resume" and t.status == TorrentStatus.DOWNLOAD_ERROR:
                     t.status = TorrentStatus.DOWNLOADING   # 恢复无进度暂停/错误 → 重新跟踪
                     t.error_message = None
-                    t.progress_at = None
-                    t.stalled_since = None
             done.append(tid)
         except Exception:  # noqa: BLE001 — 单条失败不阻断其余
             log.warning("批量 %s 失败 task=%s", action, tid, exc_info=True)
@@ -109,19 +110,23 @@ def batch(payload: dict, db: Session = Depends(get_db)):
 
 @router.post("/{task_id}/pause", status_code=204)
 def pause(task_id: int, db: Session = Depends(get_db)):
-    downloader.pause(_get_with_hash(db, task_id).info_hash)
+    t = _get_with_hash(db, task_id)
+    downloader.pause(t.info_hash)
+    t.stalled_since = None   # 暂停期间不积累坏种/无进度判定,否则会被自动清理删文件
+    t.progress_at = None
+    db.commit()
 
 
 @router.post("/{task_id}/resume", status_code=204)
 def resume(task_id: int, db: Session = Depends(get_db)):
     t = _get_with_hash(db, task_id)
     downloader.resume(t.info_hash)
+    t.stalled_since = None   # 恢复后重新计时,避免残留计时导致刚恢复又被判坏种
+    t.progress_at = None
     if t.status == TorrentStatus.DOWNLOAD_ERROR:
         t.status = TorrentStatus.DOWNLOADING   # 恢复无进度暂停/错误 → 重新跟踪
         t.error_message = None
-        t.progress_at = None
-        t.stalled_since = None
-        db.commit()
+    db.commit()
 
 
 @router.delete("/{task_id}", status_code=204)

@@ -74,6 +74,7 @@ class Bangumi(Base):
     title: Mapped[str] = mapped_column(String(255))            # 官方中文译名优先
     title_original: Mapped[str | None] = mapped_column(String(255))
     year: Mapped[int | None] = mapped_column(Integer)
+    air_date: Mapped[str | None] = mapped_column(String(32))    # 精确首播日 "2026-01-10"(NFO premiered)
     season_str: Mapped[str | None] = mapped_column(String(32))  # 如 "2026春"
     studio: Mapped[str | None] = mapped_column(String(255))     # 制作公司
     summary: Mapped[str | None] = mapped_column(Text)

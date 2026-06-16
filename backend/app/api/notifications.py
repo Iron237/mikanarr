@@ -10,6 +10,13 @@ from app.notifiers.base import EVENTS, Notification, create, known_channels
 
 router = APIRouter(prefix="/api/notifications", tags=["notifications"])
 
+SECRET_MASK = "********"
+_SECRET_KEYS = {"bot_token", "send_key", "token"}   # 凭据里的敏感字段(回前端打码)
+
+
+def _mask(creds: dict) -> dict:
+    return {k: (SECRET_MASK if k in _SECRET_KEYS and v else v) for k, v in (creds or {}).items()}
+
 
 @router.get("")
 def list_configs(db: Session = Depends(get_db)):
@@ -20,7 +27,7 @@ def list_configs(db: Session = Depends(get_db)):
         out.append({
             "channel": ch,
             "enabled": c.enabled if c else False,
-            "credentials": c.credentials if c else {},
+            "credentials": _mask(c.credentials) if c else {},
             "events": {e: bool((c.events or {}).get(e, False)) if c else False for e in EVENTS},
             "use_proxy": c.use_proxy if c else (ch == "telegram"),
         })
@@ -37,7 +44,10 @@ def upsert(channel: str, payload: dict, db: Session = Depends(get_db)):
         c = NotificationConfig(channel=channel)
         db.add(c)
     c.enabled = bool(payload.get("enabled", False))
-    c.credentials = payload.get("credentials") or {}
+    # 打码占位(********)表示未改 → 保留原值,不要把掩码写进库
+    old = c.credentials or {}
+    new_creds = payload.get("credentials") or {}
+    c.credentials = {k: (old.get(k) if v == SECRET_MASK else v) for k, v in new_creds.items()}
     c.events = {e: bool((payload.get("events") or {}).get(e, False)) for e in EVENTS}
     c.use_proxy = bool(payload.get("use_proxy", False))
     db.commit()

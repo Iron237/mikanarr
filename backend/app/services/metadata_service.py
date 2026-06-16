@@ -53,7 +53,9 @@ def _cache_image(kind: str, key: str, downloader, url: str) -> str | None:
         IMAGES_DIR.mkdir(parents=True, exist_ok=True)
         path = IMAGES_DIR / name
         if not path.exists():
-            path.write_bytes(downloader(url))
+            tmp = path.with_suffix(path.suffix + ".tmp")   # 原子落地:写一半中断不留残缺文件
+            tmp.write_bytes(downloader(url))
+            tmp.replace(path)
         return f"images/{name}"
     except Exception as e:  # noqa: BLE001
         log.warning("图片缓存失败 %s: %s", url, e)
@@ -98,6 +100,7 @@ def enrich_bangumi(db: Session, bangumi: Bangumi,
             bangumi.title_original = s.name
             bangumi.year = int(s.date[:4]) if s.date else None
             bangumi.season_str = _season_str(s.date) if s.date else None
+            bangumi.air_date = s.date or None   # 精确首播日(NFO <premiered>,Jellyfin 时间线)
             if s.date:
                 try:   # 首播日的星期即每周放送日(放送日历用)
                     bangumi.air_weekday = datetime.fromisoformat(s.date).weekday()
@@ -130,7 +133,12 @@ def enrich_bangumi(db: Session, bangumi: Bangumi,
                     if stripped and stripped != q:
                         candidates.append(stripped)
             for q in dict.fromkeys(candidates):
-                if hit := tmdb_client.find_backdrop(q):
+                try:   # 单候选失败(429/5xx/超时)不该中止其余候选
+                    hit = tmdb_client.find_backdrop(q)
+                except Exception as e:  # noqa: BLE001
+                    log.debug("TMDB 候选 %r 失败: %s", q, e)
+                    continue
+                if hit:
                     tmdb_id, url = hit
                     bangumi.tmdb_id = tmdb_id
                     bangumi.backdrop_path = _cache_image(
