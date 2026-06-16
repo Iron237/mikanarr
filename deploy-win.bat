@@ -33,17 +33,15 @@ if /i "%~1"=="logs" (
   exit /b 0
 )
 
-REM 1) Load the bundled image if it is not present yet
-docker image inspect mikanarr:latest >nul 2>&1
+REM 1) Always load the bundled image (so THIS version runs, even if an older
+REM    mikanarr:latest from a previous deploy is still present - load re-points the tag).
+echo Loading bundled image from mikanarr-image.tar.gz ^(~1 GB, may take a minute^)...
+docker load -i "mikanarr-image.tar.gz"
 if errorlevel 1 (
-  echo Loading image mikanarr:latest from mikanarr-image.tar.gz ^(~1 GB, first run is slow^)...
-  docker load -i "mikanarr-image.tar.gz"
-  if errorlevel 1 (
-    echo [X] Failed to load image. Make sure mikanarr-image.tar.gz sits next to this script.
-    echo.
-    pause
-    exit /b 1
-  )
+  echo [X] Failed to load image. Make sure mikanarr-image.tar.gz sits next to this script.
+  echo.
+  pause
+  exit /b 1
 )
 
 REM 2) Start using the pre-loaded image (no build, no Docker Hub, no .env needed).
