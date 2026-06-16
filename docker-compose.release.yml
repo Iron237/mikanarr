@@ -1,0 +1,50 @@
+# 用「预构建镜像」启动(不本地构建、不从 Docker Hub 拉基础镜像)。
+# 配合发行包里的 mikanarr-image.tar.gz:先 docker load 该镜像,再:
+#   docker compose -f docker-compose.release.yml up -d
+# 卷 / 环境变量与 docker-compose.yml 完全一致,只是用 image 取代 build。
+services:
+  mikanarr:
+    image: mikanarr:latest
+    container_name: mikanarr
+    ports:
+      - "8008:8008"
+    environment:
+      MIKANARR_PROXY_URL: ${PROXY_URL:-}
+      MIKANARR_TMDB_API_KEY: ${TMDB_API_KEY:-}
+      MIKANARR_DOWNLOADER: ${DOWNLOADER:-qb}
+      MIKANARR_QB_HOST: ${QB_HOST:-host.docker.internal}
+      MIKANARR_QB_PORT: "${QB_PORT:-8080}"
+      MIKANARR_QB_USERNAME: ${QB_USER:-admin}
+      MIKANARR_QB_PASSWORD: ${QB_PASS:-adminadmin}
+      MIKANARR_DOWNLOAD_ROOT: ${DOWNLOAD_ROOT:-/downloads}
+      MIKANARR_POLL_INTERVAL_MIN: ${POLL_INTERVAL_MIN:-15}
+      MIKANARR_IMPORT_WIN_HOST: ${LOCAL_IMPORT_PATH:-./import}
+      MIKANARR_IMPORT_NAS_HOST: ${NAS_IMPORT_PATH:-}
+      MIKANARR_NAS_SMB_PATH: ${NAS_SMB_PATH}
+    volumes:
+      - ./data/mikanarr:/config
+      - downloads:/downloads
+      - ${LOCAL_IMPORT_PATH:-./import}:/import
+      - nas_import:/import-nas
+      - bd_owned:/bd-owned
+    restart: unless-stopped
+
+volumes:
+  downloads:
+    driver: local
+    driver_opts:
+      type: cifs
+      o: "username=${NAS_USER},password=${NAS_PASS},uid=1000,gid=1000,iocharset=utf8,vers=3.0,noserverino"
+      device: "${NAS_SMB_PATH}"
+  nas_import:
+    driver: local
+    driver_opts:
+      type: cifs
+      o: "username=${NAS_USER},password=${NAS_PASS},uid=1000,gid=1000,iocharset=utf8,vers=3.0,noserverino"
+      device: "${NAS_IMPORT_PATH:-${NAS_SMB_PATH}}"
+  bd_owned:
+    driver: local
+    driver_opts:
+      type: cifs
+      o: "username=${NAS_USER},password=${NAS_PASS},uid=1000,gid=1000,iocharset=utf8,vers=3.0,noserverino"
+      device: "${BD_OWNED_PATH:-${NAS_SMB_PATH}}"
