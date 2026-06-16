@@ -19,15 +19,21 @@ from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
 from app.models import (Bangumi, BdExtra, BdRelease, Episode, NotificationConfig,
-                        Setting, Subscription, Torrent, TorrentEpisode, VideoFile)
+                        Subscription, Torrent, TorrentEpisode, VideoFile)
 
 FORMAT = "mikanarr-backup"
-VERSION = 1
+VERSION = 2
 
 # 外键安全的插入顺序(父先于子);清空用逆序
 DATA_MODELS = [Bangumi, Subscription, Episode, Torrent, TorrentEpisode,
                VideoFile, BdRelease, BdExtra]
-CONFIG_MODELS = [NotificationConfig, Setting]   # 含 cookie/凭据/路径前缀,可选
+
+# 设置迁移:导出 EDITABLE 的「生效值」(含 .env 配的,如 tmdb_api_key 也能带走),
+# 但排除「本机/连接相关、由首次向导各机自配」的项,避免导入把新机的配置覆盖回旧机的。
+_SETTING_DENYLIST = {
+    "qb_host", "qb_port", "qb_username", "qb_password", "download_root", "proxy_url",
+    "media_host_root", "bd_owned_host_root", "powerdvd_path",
+}
 
 
 def _ser(v):
@@ -43,13 +49,21 @@ def _row(obj) -> dict:
 
 
 def export_all(db: Session, include_settings: bool = False) -> dict:
-    models = DATA_MODELS + (CONFIG_MODELS if include_settings else [])
     tables = {M.__tablename__: [_row(o) for o in db.execute(select(M)).scalars()]
-              for M in models}
-    counts = {t: len(rows) for t, rows in tables.items()}
-    return {"format": FORMAT, "version": VERSION,
-            "exported_at": datetime.now(timezone.utc).isoformat(),
-            "counts": counts, "tables": tables}
+              for M in DATA_MODELS}
+    out: dict = {"format": FORMAT, "version": VERSION,
+                 "exported_at": datetime.now(timezone.utc).isoformat(), "tables": tables}
+    if include_settings:
+        from app.config import settings
+        from app.services import settings_service
+        # 生效值(含 env 配的;含密钥原文,故备份文件本身要妥善保管)
+        out["settings"] = {k: getattr(settings, k, None) for k in settings_service.EDITABLE
+                           if k not in _SETTING_DENYLIST}
+        tables["notification_config"] = [_row(o)
+                                         for o in db.execute(select(NotificationConfig)).scalars()]
+    out["counts"] = {**{t: len(r) for t, r in tables.items()},
+                     "settings": len(out.get("settings") or {})}
+    return out
 
 
 def _deser(col, v):
@@ -74,28 +88,44 @@ def _deser(col, v):
     return v
 
 
-def import_all(db: Session, data: dict, include_settings: bool = False) -> dict:
-    """整表替换式导入。返回各表写入条数。调用方负责 commit。"""
+def _insert_rows(db: Session, M, rows: list) -> int:
+    cols = {c.name: c for c in M.__table__.columns}
+    for r in rows:
+        db.add(M(**{k: _deser(cols[k], v) for k, v in r.items() if k in cols}))
+    db.flush()
+    return len(rows)
+
+
+def import_all(db: Session, data: dict) -> dict:
+    """导入番剧库 + 通知配置(都在传入的 db 会话内,调用方 commit)。
+    设置不在此处理:settings_service.update 会另开会话写库,与本会话未提交的写事务会在
+    SQLite(单写者)上互锁死;故设置由调用方在 commit 之后用 apply_settings 应用。"""
     if not isinstance(data, dict) or data.get("format") != FORMAT:
         raise ValueError("不是有效的 Mikanarr 备份文件(format 不匹配)")
     tables = data.get("tables") or {}
-    models = DATA_MODELS + (CONFIG_MODELS if include_settings else [])
 
-    # 1) 清空(外键逆序)。注意:include_settings=False 时不动设置/通知。
-    for M in reversed(models):
+    # 1) DATA:外键逆序清空 → 顺序插回(保留主键)
+    for M in reversed(DATA_MODELS):
         db.execute(delete(M))
     db.flush()
-
-    # 2) 插回(外键顺序,保留主键)
     counts: dict[str, int] = {}
-    for M in models:
-        cols = {c.name: c for c in M.__table__.columns}
-        rows = tables.get(M.__tablename__) or []
-        n = 0
-        for r in rows:
-            kwargs = {k: _deser(cols[k], v) for k, v in r.items() if k in cols}
-            db.add(M(**kwargs))
-            n += 1
-        db.flush()       # 逐表 flush:外键顺序落库,且尽早暴露问题
-        counts[M.__tablename__] = n
+    for M in DATA_MODELS:
+        counts[M.__tablename__] = _insert_rows(db, M, tables.get(M.__tablename__) or [])
+
+    # 2) 通知配置(备份含才替换;不动 Setting 表)
+    if "notification_config" in tables:
+        db.execute(delete(NotificationConfig))
+        db.flush()
+        counts["notification_config"] = _insert_rows(db, NotificationConfig,
+                                                      tables["notification_config"])
     return counts
+
+
+def apply_settings(data: dict) -> int:
+    """应用备份里的设置(合并 + 即时生效;不覆盖新机向导配的存储/连接项)。
+    必须在 import_all 的 db.commit() 之后调用,避免与数据写事务在 SQLite 上互锁。返回应用条数。"""
+    sett = data.get("settings") if isinstance(data, dict) else None
+    if not sett:
+        return 0
+    from app.services import settings_service
+    return len(settings_service.update(sett))

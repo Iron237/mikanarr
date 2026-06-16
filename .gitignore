@@ -6,6 +6,7 @@ frontend/dist/
 backend/data/
 backend/.env
 data/
+docs/
 .env
 .probe-qb/
 .pytest_cache/

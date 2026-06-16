@@ -139,13 +139,17 @@ function exportData() {
 function onImportFile(e) { importFile.value = e.target.files[0] || null; backupMsg.value = '' }
 async function importData() {
   if (!importFile.value) return
-  const extra = backupSettings.value ? ',并覆盖设置与通知' : ''
+  let data
+  try { data = JSON.parse(await importFile.value.text()) }
+  catch { backupMsg.value = '文件解析失败(不是有效 JSON 备份)'; return }
+  // 是否含设置由备份文件本身决定(导出时勾了才有),导入自动还原,无需再勾选
+  const hasSettings = !!data.settings || !!(data.tables && data.tables.notification_config)
+  const extra = hasSettings ? ',并还原设置/通知(API key/cookie/偏好,不含本机连接与路径)' : ''
   if (!window.confirm(`导入会用备份覆盖当前的番剧库 / 订阅 / 剧集 / 下载记录 / 文件路径${extra}。确定继续?`)) return
   backupMsg.value = '导入中…'
   try {
-    const data = JSON.parse(await importFile.value.text())
-    const r = await api.post('/api/backup/import' + (backupSettings.value ? '?include_settings=1' : ''), data)
-    backupMsg.value = `导入完成:共写入 ${r.total} 条。封面没显示的话,点下方「重新拉取封面/元数据」。`
+    const r = await api.post('/api/backup/import', data)
+    backupMsg.value = `导入完成:共写入 ${r.total} 条${r.settings_applied ? `(含设置 ${r.settings_applied} 项)` : ''}。封面没显示就点下方「重新拉取封面/元数据」。`
   } catch (e) { backupMsg.value = '导入失败:' + e.message }
 }
 
@@ -263,7 +267,7 @@ onMounted(() => { load(); loadStorage() })
       </p>
       <label class="row" style="cursor: pointer; gap: 6px; font-size: 12.5px; margin: 8px 0;">
         <input type="checkbox" v-model="backupSettings" />
-        同时含设置与通知(cookie / 凭据 / 路径前缀,跨机器慎用)
+        <span>导出时含设置(API key / 蜜柑 cookie / 偏好;<strong>不含</strong>本机连接与路径,导入时自动还原,无需再勾)</span>
       </label>
       <div class="row" style="gap: 10px; flex-wrap: wrap; align-items: center;">
         <button class="btn sm" @click="exportData"><Icon name="download" :size="13" /> 导出备份</button>

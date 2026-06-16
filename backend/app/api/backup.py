@@ -26,10 +26,11 @@ def export_data(include_settings: bool = False, db: Session = Depends(get_db)):
 
 
 @router.post("/import")
-def import_data(payload: dict, include_settings: bool = False, db: Session = Depends(get_db)):
-    """导入备份(整表替换,覆盖当前番剧库/订阅/文件记录)。payload = 备份 JSON 对象。"""
+def import_data(payload: dict, db: Session = Depends(get_db)):
+    """导入备份。payload = 备份 JSON 对象。番剧库整表替换;若文件含设置/通知则一并还原
+    (设置走 settings_service.update 合并 + 即时生效,无需额外重载或勾选)。"""
     try:
-        counts = backup.import_all(db, payload, include_settings=include_settings)
+        counts = backup.import_all(db, payload)
         db.commit()
     except ValueError as e:
         raise HTTPException(400, str(e)) from None
@@ -37,15 +38,9 @@ def import_data(payload: dict, include_settings: bool = False, db: Session = Dep
         db.rollback()
         log.exception("导入备份失败")
         raise HTTPException(500, f"导入失败(已回滚):{e}") from None
-
-    # 导入了设置/通知 → 即时把 DB 覆盖灌进运行时 settings(否则要等重启才生效)
-    if include_settings:
-        try:
-            from app.services import settings_service
-            settings_service.load_overrides()
-            from app.services import launch
-            launch._token_cache = None   # 令牌可能随设置一起换了,清缓存
-        except Exception as e:  # noqa: BLE001
-            log.warning("导入后重载设置失败(重启可生效): %s", e)
+    # 设置在数据 commit 之后再应用(单写者下避免两会话写锁互锁)
+    applied = backup.apply_settings(payload)
+    counts["settings"] = applied
     log.info("导入备份完成:%s", counts)
-    return {"ok": True, "imported": counts, "total": sum(counts.values())}
+    return {"ok": True, "imported": counts, "total": sum(counts.values()),
+            "settings_applied": applied}
