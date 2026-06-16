@@ -100,9 +100,12 @@ def update_subscription(sub_id: int, payload: dict, background: BackgroundTasks,
 
 def _purge_subscription(db: Session, sub: Subscription, delete_files: bool) -> None:
     """删除订阅及其下载任务/库记录(下载器任务一并移除,可选删文件)。番剧/剧集保留(可能被其它订阅共用)。"""
+    import os
+
     from app.clients.downloader import downloader
     torrents = db.execute(select(Torrent).where(
         Torrent.subscription_id == sub.id)).scalars().all()
+    no_dl = {t.id for t in torrents if not t.info_hash}   # 本地导入/智能下载容器:不在下载器里
     for t in torrents:
         if t.info_hash:
             try:
@@ -112,12 +115,20 @@ def _purge_subscription(db: Session, sub: Subscription, delete_files: bool) -> N
     t_ids = [t.id for t in torrents]
     if t_ids:
         for vf in db.execute(select(VideoFile).where(VideoFile.torrent_id.in_(t_ids))).scalars():
+            # 容器文件下载器删不到 → 勾选删文件时直接删盘(限下载根内)
+            if delete_files and vf.torrent_id in no_dl:
+                try:
+                    os.remove(settings.download_root_local / vf.relative_path)
+                except OSError:
+                    pass
             db.delete(vf)
         for te in db.execute(select(TorrentEpisode).where(
                 TorrentEpisode.torrent_id.in_(t_ids))).scalars():
             db.delete(te)
+        db.flush()             # 文件/集关联先落删,解开对 torrent 的引用,再删 torrent / 订阅
         for t in torrents:
             db.delete(t)
+    db.flush()
     db.delete(sub)
 
 

@@ -3,6 +3,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.config import settings
 from app.database import get_db
 from app.models import (Bangumi, BdRelease, Episode, EpisodeType, Kind, Subscription,
                         Torrent, TorrentEpisode, TorrentStatus, VideoFile)
@@ -202,7 +203,13 @@ def _sub_out(s: Subscription) -> dict:
 
 
 def _purge_bangumi(db: Session, b: Bangumi, delete_files: bool) -> None:
-    """级联删除番剧的订阅/剧集/任务记录,下载器任务一并移除(可选删文件)。"""
+    """级联删除番剧的订阅/剧集/任务记录,下载器任务一并移除(可选删文件)。
+
+    按外键依赖分阶段 flush(子表先落删再删父):SQLAlchemy 工作单元对无 relationship 的外键
+    (如 bd_release.bangumi_id)不会自动排删除顺序,单次 commit 可能先删 bangumi → 撞 FK 约束。
+    """
+    import os
+
     from app.clients.downloader import downloader
     from app.models import VideoFile
 
@@ -210,6 +217,7 @@ def _purge_bangumi(db: Session, b: Bangumi, delete_files: bool) -> None:
         Subscription.bangumi_id == b.id)).scalars().all()
     torrents = db.execute(select(Torrent).where(
         Torrent.subscription_id.in_(sub_ids))).scalars().all() if sub_ids else []
+    no_dl = {t.id for t in torrents if not t.info_hash}   # 本地导入/库容器:不在下载器里
     for t in torrents:
         if t.info_hash:
             try:
@@ -220,20 +228,30 @@ def _purge_bangumi(db: Session, b: Bangumi, delete_files: bool) -> None:
     t_ids = [t.id for t in torrents]
     if t_ids:
         for vf in db.execute(select(VideoFile).where(VideoFile.torrent_id.in_(t_ids))).scalars():
+            # 容器(本地/库扫描)文件下载器删不到 → 勾选删文件时直接删盘(限下载根内,绝不碰已购原盘)
+            if delete_files and vf.torrent_id in no_dl:
+                try:
+                    os.remove(settings.download_root_local / vf.relative_path)
+                except OSError:
+                    pass
             db.delete(vf)
         for te in db.execute(select(TorrentEpisode).where(
                 TorrentEpisode.torrent_id.in_(t_ids))).scalars():
             db.delete(te)
+        db.flush()                       # 文件/集关联先落删,解开对 torrent/episode 的引用
         for t in torrents:
             db.delete(t)
     for ep in db.execute(select(Episode).where(Episode.bangumi_id == b.id)).scalars():
         db.delete(ep)
+    db.flush()                           # torrent/episode 落删,解开对 subscription/bangumi 的引用
     for s in db.execute(select(Subscription).where(
             Subscription.bangumi_id == b.id)).scalars():
         db.delete(s)
-    # BD 发行(extras 经 relationship cascade 一并删);否则 FK 约束让删番剧报错
+    # BD 发行(extras 经 relationship cascade 一并删);bd_release.bangumi_id 无 relationship,
+    # 必须在删 bangumi 前显式落删并 flush,否则 FK 约束报错
     for br in db.execute(select(BdRelease).where(BdRelease.bangumi_id == b.id)).scalars():
         db.delete(br)
+    db.flush()
     db.delete(b)
 
 
