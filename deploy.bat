@@ -45,9 +45,12 @@ docker compose up -d --build
 if errorlevel 1 (
   echo.
   echo [X] Build/start failed. If it timed out pulling base images
-  echo     ^(auth.docker.io / registry-1.docker.io^) you cannot reach Docker Hub:
-  echo     add registry-mirrors in Docker Desktop ^> Settings ^> Docker Engine, then retry
-  echo     ^(see DEPLOY.md^). Otherwise check your .env.
+  echo     ^(auth.docker.io / registry-1.docker.io^) you cannot reach Docker Hub. Either:
+  echo       1^) EASIEST - use the full-environment package mikanarr-win-*.zip with
+  echo          deploy-win.bat: it bundles the image, needs no build and no Docker Hub.
+  echo       2^) or add registry-mirrors in Docker Desktop ^> Settings ^> Docker Engine,
+  echo          then re-run this script ^(see DEPLOY.md^).
+  echo     Otherwise check your .env.
   echo.
   pause
   exit /b 1
