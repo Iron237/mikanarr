@@ -31,18 +31,21 @@ def _owned_discs(r: BdRelease) -> list[dict]:
         return []
     folder = r.root_path[len("@owned/"):]
     mount = Path(settings.bd_owned_mount) / folder
-    if not mount.is_dir():
-        return []
     out: list[dict] = []
-    for d in sorted([x for x in mount.iterdir() if x.is_dir()], key=lambda x: x.name):
-        if (d / "BDMV").is_dir():
-            host = launch.owned_host_path(f"{folder}/{d.name}")
-            out.append({"name": d.name, "bd_url": launch.launch_url("bd", host),
+    try:    # NAS/CIFS 挂载抖动会抛 OSError;序列化时不可拖垮 /api/bd/releases 与详情页
+        if not mount.is_dir():
+            return []
+        for d in sorted([x for x in mount.iterdir() if x.is_dir()], key=lambda x: x.name):
+            if (d / "BDMV").is_dir():
+                host = launch.owned_host_path(f"{folder}/{d.name}")
+                out.append({"name": d.name, "bd_url": launch.launch_url("bd", host),
+                            "reveal_url": launch.launch_url("reveal", host)})
+        if not out and (mount / "BDMV").is_dir():   # 单碟直接在发行根
+            host = launch.owned_host_path(folder)
+            out.append({"name": r.title, "bd_url": launch.launch_url("bd", host),
                         "reveal_url": launch.launch_url("reveal", host)})
-    if not out and (mount / "BDMV").is_dir():   # 单碟直接在发行根
-        host = launch.owned_host_path(folder)
-        out.append({"name": r.title, "bd_url": launch.launch_url("bd", host),
-                    "reveal_url": launch.launch_url("reveal", host)})
+    except OSError:
+        return []
     return out
 
 

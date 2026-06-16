@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import base64
 import secrets
+import threading
 from urllib.parse import quote
 
 from sqlalchemy import select
@@ -18,28 +19,36 @@ from app.models import Setting
 
 _TOKEN_KEY = "launch_token"
 _token_cache: str | None = None
+_token_lock = threading.Lock()
 
 
 def get_token() -> str:
-    """协议头防滥用令牌:首次取用时生成并持久化到 DB(与处理器、URL 始终一致)。"""
+    """协议头防滥用令牌:首次取用时生成并持久化到 DB(与处理器、URL 始终一致)。
+
+    加锁 + 双检:tracker/worker/请求多线程首次并发取 token 时,避免两线程各生成各 INSERT
+    同一主键 → UNIQUE constraint failed 致 500。
+    """
     global _token_cache
     if _token_cache:
         return _token_cache
     if settings.launch_token:
         _token_cache = settings.launch_token
         return _token_cache
-    with db_session() as db:
-        row = db.get(Setting, _TOKEN_KEY)
-        tok = (row.value or {}).get("v") if row else None
-        if not tok:
-            tok = secrets.token_urlsafe(18)
-            if row is None:
-                db.add(Setting(key=_TOKEN_KEY, value={"v": tok}))
-            else:
-                row.value = {"v": tok}
-    settings.launch_token = tok
-    _token_cache = tok
-    return tok
+    with _token_lock:
+        if _token_cache:
+            return _token_cache
+        with db_session() as db:
+            row = db.get(Setting, _TOKEN_KEY)
+            tok = (row.value or {}).get("v") if row else None
+            if not tok:
+                tok = secrets.token_urlsafe(18)
+                if row is None:
+                    db.add(Setting(key=_TOKEN_KEY, value={"v": tok}))
+                else:
+                    row.value = {"v": tok}
+        settings.launch_token = tok
+        _token_cache = tok
+        return tok
 
 
 def _join(root: str, rel: str) -> str:
@@ -103,7 +112,11 @@ foreach ($p in $Matches[2].Split('&')) {{
 if ($tok -ne $TOKEN -or -not $path) {{ exit 2 }}
 $pl = $path.ToLower()
 $ok = $false
-foreach ($r in $ROOTS) {{ if ($r -and $pl.StartsWith($r.ToLower())) {{ $ok = $true; break }} }}
+foreach ($r in $ROOTS) {{
+  if (-not $r) {{ continue }}
+  $rl = $r.ToLower().TrimEnd('\\')
+  if ($pl -eq $rl -or $pl.StartsWith($rl + '\\')) {{ $ok = $true; break }}
+}}
 if (-not $ok) {{ exit 3 }}
 switch ($action) {{
   'play'   {{ Start-Process -FilePath $path }}

@@ -93,6 +93,9 @@ def _candidate(subgroup_id: str, subgroup_name: str | None, st) -> dict | None:
     if not st.torrent_url:
         return None
     p = parse(st.title)
+    # SP/OVA/OP·ED/PV 等非正片单发不作为正片候选(否则会被当正片集下载,与真正片撞集号)
+    if p.ep_type != "regular" and not p.is_batch:
+        return None
     if not p.episodes and not p.is_batch:
         return None
     if p.resolution != (settings.auto_dl_resolution or "1080p"):
@@ -276,10 +279,12 @@ def scan_bangumi(db: Session, bangumi: Bangumi, do_fill: bool = True,
     sub = _auto_sub(db, bangumi)
     submitted = sum(1 for c in selected if _submit_candidate(db, sub, c))
     db.flush()
-    log.info("智能扫描 %s:候选 %s,补/升 %s 集,提交 %s 个种子",
-             bangumi.title, len(cands), len(needed), submitted)
+    gaps = sorted(remaining)   # 仍缺、但只有「会重复已有集的大合集」能补 → 按去重策略未下,显式留痕
+    log.info("智能扫描 %s:候选 %s,补/升 %s 集,提交 %s 个种子%s",
+             bangumi.title, len(cands), len(needed), submitted,
+             f",留待 {gaps}(仅大合集源,避免重复未下)" if gaps else "")
     return {"bangumi": bangumi.id, "title": bangumi.title, "candidates": len(cands),
-            "needed": sorted(needed), "submitted": submitted,
+            "needed": sorted(needed), "submitted": submitted, "gaps": gaps,
             # 进度列表用:本次选中的种子(画质标签 + 集范围),展示「进入下载前」挑了什么
             "picked": [{"title": c["title"][:80], "source": c["source"],
                         "quality": c["quality"], "episodes": sorted(c["episodes"])[:3],

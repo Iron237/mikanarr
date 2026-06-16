@@ -31,6 +31,7 @@ const delConfirm = ref(null)     // { ids: [...] } 待确认删除
 const delFiles = ref(false)
 const busy = ref(false)
 let pollTimer = null
+let mounted = true
 
 const allSelected = computed(() => subs.value.length > 0 && selected.value.size === subs.value.length)
 
@@ -78,6 +79,7 @@ async function startImportAll() {
 }
 async function pollImportAll() {
   allStatus.value = await api.get('/api/import/mikan-all/status')
+  if (!mounted) return            // 卸载后别再轮询/起定时器(否则导入数分钟内切页会泄漏)
   await load()
   if (allStatus.value.running) allTimer = setTimeout(pollImportAll, 2000)
 }
@@ -92,6 +94,7 @@ async function startImport() {
 
 async function pollImport() {
   importStatus.value = await api.get('/api/import/mikan/status')
+  if (!mounted) return
   await load()
   if (importStatus.value.running) {
     pollTimer = setTimeout(pollImport, 2000)
@@ -99,7 +102,7 @@ async function pollImport() {
 }
 
 onMounted(load)
-onUnmounted(() => { clearTimeout(pollTimer); clearTimeout(allTimer) })
+onUnmounted(() => { mounted = false; clearTimeout(pollTimer); clearTimeout(allTimer) })
 </script>
 
 <template>

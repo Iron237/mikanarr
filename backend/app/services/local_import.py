@@ -252,6 +252,7 @@ def _import_group(group: dict) -> str:
         dest_dir.mkdir(parents=True, exist_ok=True)
         ok, failed = 0, 0
         seen_rel: set[str] = set()
+        touched_eps: set[int] = set()
         for fp in group["files"]:
             src = Path(fp)
             rel = f"{safe}/{src.name}"
@@ -278,19 +279,12 @@ def _import_group(group: dict) -> str:
             p = parse(src.name)
             vf.subgroup = p.group
             vf.source = p.source
-            # 影片/OVA 不归正片集(留作「影片本体」);仅 TV 番剧按集映射
-            if bangumi.kind == Kind.TV and len(p.episodes) == 1:
-                n = p.episodes[0]
-                ep = db.execute(select(Episode).where(
-                    Episode.bangumi_id == bangumi.id, Episode.type == EpisodeType.REGULAR,
-                    Episode.number == n)).scalar_one_or_none()
-                if ep is None:
-                    ep = Episode(bangumi_id=bangumi.id, number=n, type=EpisodeType.REGULAR)
-                    db.add(ep)
-                    db.flush()
-                vf.episode_id = ep.id
-                if not db.get(TorrentEpisode, (torrent.id, ep.id)):
-                    db.add(TorrentEpisode(torrent_id=torrent.id, episode_id=ep.id))
+            # 按 ep_type 归类(影片/OVA 不归集留作影片本体;SP/特典走对应类型,不占正片集号)。
+            # 复用库扫描的同一映射逻辑,三个导入入口行为一致。
+            from app.services.library_scan import _map_episode
+            vf.episode_id = _map_episode(db, bangumi, torrent, p)
+            if vf.episode_id:
+                touched_eps.add(vf.episode_id)
             try:
                 r = media_probe.probe(dest)
                 vf.resolution = r.resolution or parse(src.name).resolution
@@ -306,6 +300,10 @@ def _import_group(group: dict) -> str:
                 log.warning("导入探测失败 %s: %s", dest, e)
             ok += 1
             db.flush()
+        # 导入后重算受影响集的 active(同集若已有 RSS/其它来源文件,保证唯一最优,防多 active)
+        from app.services.postprocess import _apply_version_switch
+        for ep_id in touched_eps:
+            _apply_version_switch(db, ep_id)
         return f"{bangumi.title}: {ok} 个文件" + (f"({failed} 个失败)" if failed else "")
 
 

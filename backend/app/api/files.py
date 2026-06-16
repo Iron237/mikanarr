@@ -119,7 +119,10 @@ def delete_file(file_id: int, delete_disk: bool = False, db: Session = Depends(g
         raise HTTPException(404)
     old_ep = vf.episode_id
     if delete_disk:
-        path = settings.download_root_local / vf.relative_path
+        base = settings.download_root_local.resolve()
+        path = (settings.download_root_local / vf.relative_path).resolve()
+        if base != path and base not in path.parents:   # 防目录穿越:解析后须仍在下载根内
+            raise HTTPException(400, "文件路径非法(超出下载根)")
         try:
             os.remove(path)
         except OSError as e:  # noqa: BLE001 — 文件可能已不在/做种锁定

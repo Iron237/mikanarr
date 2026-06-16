@@ -103,6 +103,7 @@ def _purge_subscription(db: Session, sub: Subscription, delete_files: bool) -> N
     import os
 
     from app.clients.downloader import downloader
+    from app.services.postprocess import _apply_version_switch
     torrents = db.execute(select(Torrent).where(
         Torrent.subscription_id == sub.id)).scalars().all()
     no_dl = {t.id for t in torrents if not t.info_hash}   # 本地导入/智能下载容器:不在下载器里
@@ -113,8 +114,11 @@ def _purge_subscription(db: Session, sub: Subscription, delete_files: bool) -> N
             except Exception:  # noqa: BLE001 — 下载器里可能已不存在
                 pass
     t_ids = [t.id for t in torrents]
+    touched_eps: set[int] = set()
     if t_ids:
         for vf in db.execute(select(VideoFile).where(VideoFile.torrent_id.in_(t_ids))).scalars():
+            if vf.episode_id:
+                touched_eps.add(vf.episode_id)   # 番剧/剧集保留:该集少了文件,删后要重算 active
             # 容器文件下载器删不到 → 勾选删文件时直接删盘(限下载根内)
             if delete_files and vf.torrent_id in no_dl:
                 try:
@@ -130,6 +134,10 @@ def _purge_subscription(db: Session, sub: Subscription, delete_files: bool) -> N
             db.delete(t)
     db.flush()
     db.delete(sub)
+    db.flush()
+    # 番剧未删(剧集可能被其它订阅共用)→ 把失去 active 文件的集重算到次优源
+    for ep_id in touched_eps:
+        _apply_version_switch(db, ep_id)
 
 
 @router.delete("/{sub_id}", status_code=204)

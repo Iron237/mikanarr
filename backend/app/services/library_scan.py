@@ -268,6 +268,12 @@ def _run() -> None:
                     if n or upd:
                         state["matched"].append(
                             f"{b.title}: +{n}" + (f" ~{upd}" if upd else ""))
+                        # 新增/更新文件后重算受影响集的 active,保证每集唯一最优(防多 active)
+                        from app.services.postprocess import _apply_version_switch
+                        for ep_id in set(db.execute(select(VideoFile.episode_id).where(
+                                VideoFile.torrent_id == t.id,
+                                VideoFile.episode_id.isnot(None))).scalars()):
+                            _apply_version_switch(db, ep_id)
             except Exception as e:  # noqa: BLE001
                 log.warning("库扫描处理 %s 失败: %s", folder.name, e)
                 state["unmatched"].append(f"{folder.name}(出错)")
