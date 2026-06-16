@@ -12,7 +12,7 @@ FROM python:3.11-slim
 ARG DEBIAN_MIRROR=mirrors.tuna.tsinghua.edu.cn
 ARG PIP_INDEX=https://pypi.tuna.tsinghua.edu.cn/simple
 RUN sed -i "s|deb.debian.org|${DEBIAN_MIRROR}|g" /etc/apt/sources.list.d/debian.sources \
-    && apt-get update && apt-get install -y --no-install-recommends ffmpeg \
+    && apt-get update && apt-get install -y --no-install-recommends ffmpeg cifs-utils \
     && rm -rf /var/lib/apt/lists/*
 WORKDIR /opt/mikanarr/backend
 COPY backend/pyproject.toml .

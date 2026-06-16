@@ -4,17 +4,20 @@
 
 > 架构:linux/amd64(Windows Docker Desktop = WSL2,适用)。ARM 机器请用源码包自行构建。
 
-## 步骤
+## 步骤(全程网页配置,不用编辑任何文本)
 
 1. 安装并启动 **Docker Desktop**。
-2. 解压本包,**双击 `deploy-win.bat`**。
-   - 首次会 `docker load` 载入镜像(约 1GB,稍慢),然后生成 `.env` 并用记事本打开。
-3. 在 `.env` 填:`NAS_SMB_PATH` / `NAS_USER` / `NAS_PASS`(下载根 SMB 共享与凭据),按需填代理 `PROXY_URL`、下载器、TMDB key。保存。
-4. 再次**双击 `deploy-win.bat`** → 启动。
-5. 浏览器打开 **http://localhost:8008**。
+2. 解压本包,**双击 `deploy-win.bat`**。首次会 `docker load` 载入镜像(约 1GB,稍慢)后自动启动。
+3. 浏览器打开 **http://localhost:8008** → 自动进入**首次配置向导**:
+   - **存储**:选「NAS / SMB」填共享地址(如 `//192.168.1.100/anime/mikanarr`)+ 账号/密码 →「测试连接」通过即挂载;或选「本地 / Docker 路径」用容器内 `/downloads`。
+   - **下载器**:qBittorrent 地址/端口/账号密码 + 写盘根(可「测试连接」)。
+   - **代理**:国内填 `http://host.docker.internal:10808`,不用可留空。
+   - **元数据**(可跳过):TMDB key、蜜柑 cookie。
+   - 完成 → 进入主页。
+4. 之后所有项都能在**设置页**改;NAS 也能在设置页重配。
 
 - 看日志:`deploy-win.bat logs` ;停止:`deploy-win.bat down`
-- 改了 `.env`:再跑一次 `deploy-win.bat` 即可。
+- 不再需要手编辑 `.env`(NAS/代理/下载器全在网页向导里)。
 
 ## 迁移历史数据
 

@@ -11,7 +11,7 @@ from fastapi.staticfiles import StaticFiles
 
 from app import scheduler
 from app.api import (backup, bangumi, bd, config, files, import_mikan, launch, logs,
-                     notifications, search, subscriptions, system, tasks, ws)
+                     notifications, search, setup, subscriptions, system, tasks, ws)
 from app.clients.downloader import downloader
 from app.config import settings
 from app.database import init_db
@@ -27,6 +27,8 @@ async def lifespan(_app: FastAPI):
     init_db()
     from app.services import settings_service
     settings_service.load_overrides()   # DB 设置覆盖 .env(在连下载器之前)
+    from app.services import storage
+    storage.ensure_at_startup()          # smb 模式:把 NAS 挂到 /downloads(失败不阻塞)
     try:
         downloader.ensure_ready()
         log.info("下载器[%s]连接正常: %s", downloader.name, downloader.healthy())
@@ -57,6 +59,7 @@ app.include_router(import_mikan.router)
 app.include_router(config.router)
 app.include_router(launch.router)
 app.include_router(backup.router)
+app.include_router(setup.router)
 app.include_router(logs.router)
 
 (settings.data_dir / "images").mkdir(parents=True, exist_ok=True)

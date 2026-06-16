@@ -52,6 +52,15 @@ class Settings(BaseSettings):
     # 本应用视角的同一目录(开发期 Windows 路径;容器内与 download_root 相同)
     download_root_local: Path = Path("/downloads")
 
+    # 存储(首次向导配置;App 在容器内把 NAS/SMB 自挂载到 download_root_local)
+    # storage_mode: "" = compose 托管(旧/dev,App 不挂);"smb" = App 用 mount() 挂载;"local" = 容器内本地路径
+    storage_mode: str = ""
+    smb_host_path: str = ""       # //ip/share
+    smb_username: str = ""
+    smb_password: str = ""
+    smb_vers: str = "3.0"
+    setup_done: bool = False      # 首次配置向导是否完成
+
     # 本地导入源:主机路径前缀 → 容器挂载点(把用户粘贴的 Win/NAS 路径翻译成容器内可见路径)
     import_win_host: str = ""     # = LOCAL_IMPORT_PATH(Windows 磁盘源,挂到 /import)
     import_nas_host: str = ""     # = NAS_IMPORT_PATH(NAS 源 UNC,挂到 /import-nas)

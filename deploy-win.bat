@@ -46,30 +46,24 @@ if errorlevel 1 (
   )
 )
 
-REM 2) First run: create .env from the template and open it for editing
-if not exist ".env" (
-  copy /y ".env.example" ".env" >nul
-  echo [!] Created .env. Notepad will open - fill in NAS path/credentials, SAVE,
-  echo     then double-click this script again.
-  echo.
-  notepad ".env"
-  pause
-  exit /b 1
-)
-
-REM 3) Start using the pre-loaded image (no build, no Docker Hub)
+REM 2) Start using the pre-loaded image (no build, no Docker Hub, no .env needed).
+REM    NAS / proxy / qB are configured in the WebUI setup wizard on first open.
 echo Starting Mikanarr (using the bundled image)...
 docker compose -f docker-compose.release.yml up -d
 if errorlevel 1 (
   echo.
-  echo [X] Start failed. Check the error above and your .env
-  echo     - most often a wrong NAS path or credentials = CIFS mount failure.
+  echo [X] Start failed. See the error above. (Docker running? port 8008 free?)
   echo.
   pause
   exit /b 1
 )
 echo.
-echo [OK] Mikanarr started.  WebUI:  http://localhost:8008
+echo [OK] Mikanarr started.
+echo.
+echo   Open  http://localhost:8008  in your browser.
+echo   First time: a SETUP WIZARD walks you through storage (NAS/SMB or local),
+echo   downloader, proxy and metadata - all in the web UI, no text files to edit.
+echo.
 echo      Logs:  deploy-win.bat logs
 echo      Stop:  deploy-win.bat down
 echo.

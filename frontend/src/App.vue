@@ -1,8 +1,11 @@
 <script setup>
-import { onMounted } from 'vue'
+import { computed, onMounted } from 'vue'
+import { useRoute } from 'vue-router'
 import { useTasksStore } from './stores/tasks'
 import Icon from './components/Icon.vue'
 
+const route = useRoute()
+const bare = computed(() => route.name === 'setup')   // 首次配置向导:全屏,无侧边栏
 const tasksStore = useTasksStore()
 onMounted(() => {
   tasksStore.load()
@@ -11,7 +14,8 @@ onMounted(() => {
 </script>
 
 <template>
-  <div class="layout">
+  <RouterView v-if="bare" />
+  <div v-else class="layout">
     <aside class="sidebar">
       <div class="logo">🍊 Mikanarr</div>
       <nav>
