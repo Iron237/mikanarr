@@ -183,12 +183,12 @@ def detail(bangumi_id: int, db: Session = Depends(get_db)):
 
 
 def _bd_releases_out(db: Session, bangumi_id: int) -> list[dict]:
-    """详情页只返发行概要(计数),特典按发行懒加载(GET /api/bd/releases/{id})。"""
-    from app.api.bd import bd_release_summary
+    """详情页返发行实体 + 打开目录 URL(去特典分支:特典不编目、不在网页展示)。"""
+    from app.api.bd import bd_release_out
     from app.models import BdRelease
     rows = db.execute(select(BdRelease).where(
         BdRelease.bangumi_id == bangumi_id)).scalars().all()
-    return [bd_release_summary(r) for r in rows]
+    return [bd_release_out(r) for r in rows]
 
 
 def _sub_source(s: Subscription) -> str:

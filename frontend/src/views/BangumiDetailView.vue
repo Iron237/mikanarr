@@ -394,11 +394,11 @@ onUnmounted(() => { mounted = false; clearTimeout(autoTimer) })
         </div>
       </template>
 
-      <!-- BD / 特典 -->
+      <!-- BD 发行 -->
       <template v-if="b.bd_releases && b.bd_releases.length">
-        <div class="page-title" style="margin-top: 22px;">BD / 特典
+        <div class="page-title" style="margin-top: 22px;">BD 发行
           <span class="muted" style="font-size: 12px; font-weight: 400;">
-            (蓝光发行的特别动画/短剧/音频/图集/扫描等)
+            (正片已替换为 BD;特典 / 扫描 / CD 点「打开目录」用本机应用浏览)
           </span>
         </div>
         <BdReleases :releases="b.bd_releases" />

@@ -233,7 +233,7 @@ def _heal_bd_extras(db) -> int:
 
     覆盖任意来源(qB 下载 / 库扫描 / 本地导入)与任意嵌套结构(如 .../短剧/…),与扫描顺序、
     per-file source 无关。判据 = 该番剧有 BD 发行 且 文件名判为 BD 特典(纯集号正片不命中)。
-    特典本身仍由 BD 扫描就地收为 BdExtra,故只是从剧集网格摘除,不丢数据。
+    只从剧集网格摘除文件记录,不动磁盘文件——特典留在发行目录里,经「打开目录」浏览。
     """
     from app.services.postprocess import _apply_version_switch
     bd_bangumi = set(db.execute(select(BdRelease.bangumi_id).where(

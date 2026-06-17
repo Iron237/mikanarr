@@ -80,7 +80,7 @@ const SRC = { bdrip: ['BDRip', 'accent'], raw_disc: ['自购原盘', 'green'] }
         <Icon name="disc" :size="14" style="color: var(--accent);" />
         <strong>{{ scan.running ? '扫描中' : '扫描完成' }}</strong>
         <span class="muted" v-if="scan.current">· {{ scan.current }}</span>
-        <span>· 发行 {{ scan.releases }} 套 · 特典 {{ scan.extras }} 项</span>
+        <span>· 发行 {{ scan.releases }} 套</span>
         <div class="spacer" />
         <button v-if="!scan.running" class="btn sm" @click="scan = null"><Icon name="close" :size="13" /></button>
       </template>
@@ -100,7 +100,6 @@ const SRC = { bdrip: ['BDRip', 'accent'], raw_disc: ['自购原盘', 'green'] }
           <div class="row" style="gap: 8px; flex-wrap: wrap;">
             <strong class="bd-title" :title="r.title">{{ r.title }}</strong>
             <span class="tag" :class="SRC[r.source_kind]?.[1]">{{ SRC[r.source_kind]?.[0] || r.source_kind }}</span>
-            <span v-if="r.extra_count" class="tag">特典 {{ r.extra_count }}</span>
           </div>
           <div class="row" style="gap: 8px; margin-top: 8px; flex-wrap: wrap;">
             <select class="input sm" :value="r.bangumi_id ?? ''" @change="bind(r, $event)" style="max-width: 240px;">
@@ -114,7 +113,7 @@ const SRC = { bdrip: ['BDRip', 'accent'], raw_disc: ['自购原盘', 'green'] }
           </div>
         </div>
       </div>
-      <!-- 特典:概要计数 + 按发行懒加载(BdReleases 内部展开才拉完整特典)-->
+      <!-- 打开目录:特典留在发行目录里,用资源管理器 / 本机应用浏览(自购原盘可逐碟 PowerDVD)-->
       <BdReleases :releases="[r]" :show-header="false" />
     </div>
   </div>

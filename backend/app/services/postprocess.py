@@ -118,8 +118,8 @@ def process_torrent(db: Session, torrent_id: int) -> None:
         rel_path = qf["name"].replace("\\", "/").lstrip("/")
         if not media_probe.is_video(rel_path):
             continue
-        # BD 特典(带描述标签的非正片:NCOP/Menu/短剧/TALK/Lyric…)不按 web 集号当正片;
-        # 交 BD 扫描就地收为特典(BdExtra),不在剧集网格登记。仅 BD 源生效,Web 走原逻辑不变。
+        # BD 特典(带描述标签的非正片:NCOP/Menu/短剧/TALK/Lyric…)不按 web 集号当正片,不在剧集
+        # 网格登记;留在发行目录里经「打开目录」浏览。仅 BD 源生效,Web 走原逻辑不变。
         from app.services.bd_scan import bd_is_extra_video
         base = PurePosixPath(rel_path).name
         if parse(base).source == "BD" and bd_is_extra_video(base):

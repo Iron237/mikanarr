@@ -1,10 +1,10 @@
-"""BD 三件套展示结构 + 番剧生命周期(完结转补全 / 全 BD 收尾)单元测试(内存 SQLite)。"""
+"""BD 发行输出 + 正片/特典判别 + 番剧生命周期(完结转补全 / 全 BD 收尾)单元测试(内存 SQLite)。"""
 import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from app.database import Base
-from app.models import (AiringStatus, Bangumi, BdExtra, BdRelease, Episode, EpisodeType,
+from app.models import (AiringStatus, Bangumi, BdRelease, Episode, EpisodeType,
                         Subscription, Torrent, TorrentEpisode, TorrentStatus, VideoFile)
 from app.services import lifecycle
 
@@ -30,54 +30,19 @@ def _bdrip(db):
     return b, r
 
 
-def _extra(db, r, **kw):
-    db.add(BdExtra(bd_release_id=r.id, **kw))
-    db.flush()
-
-
-def test_image_books_grouped_natsorted_with_cover(db):
+def test_release_out_open_url_no_extras(db, monkeypatch):
+    """发行输出(去特典分支):有「打开目录」URL(mikanarr://reveal),不含任何特典编目字段。"""
+    from app.api import bd as bd_api
+    from app.config import settings
+    monkeypatch.setattr(settings, "media_host_root", "Z:\\番剧\\mikanarr")
+    monkeypatch.setattr(settings, "launch_token", "tok")
     _, r = _bdrip(db)
-    for name in ("002.jpg", "010.jpg", "001.jpg", "cover.jpg"):
-        _extra(db, r, category="scans", media_kind="image", name=name,
-               relative_path=f"BD/[VCB] Bocchi/Scans/Vol.1/{name}")
-    _extra(db, r, category="scans", media_kind="image", name="001.jpg",
-           relative_path="BD/[VCB] Bocchi/Scans/Vol.2/001.jpg")
-    from app.api.bd import bd_release_detail as bd_release_out
-    books = bd_release_out(r)["image_books"]
-    assert len(books) == 2
-    v1 = next(bk for bk in books if bk["folder"] == "Vol.1")
-    assert v1["count"] == 4
-    # 自然排序:001 < 002 < 010 < cover(字母排数字后)
-    assert [p["name"] for p in v1["pages"]] == ["001.jpg", "002.jpg", "010.jpg", "cover.jpg"]
-    # 册封面 = 首页(第 1 页,自然排序后的 001.jpg)
-    assert v1["cover"] == v1["pages"][0]["url"]
-
-
-def test_audio_album_sorted_by_track_no(db):
-    _, r = _bdrip(db)
-    for name, tno, title in (("03.flac", 3, "曲三"), ("01.flac", 1, "曲一"), ("02.flac", 2, None)):
-        _extra(db, r, category="audio", media_kind="audio", name=name,
-               relative_path=f"BD/[VCB] Bocchi/CDs/Album/{name}",
-               track_no=tno, track_title=title, duration=200.0)
-    from app.api.bd import bd_release_detail as bd_release_out
-    albums = bd_release_out(r)["audio_albums"]
-    assert len(albums) == 1 and albums[0]["folder"] == "Album"
-    assert [t["track_no"] for t in albums[0]["tracks"]] == [1, 2, 3]
-    assert albums[0]["tracks"][1]["title"] == "02"   # 无标签标题 → 回退文件名 stem
-
-
-def test_videos_carry_full_spec(db):
-    _, r = _bdrip(db)
-    _extra(db, r, category="sp_anime", media_kind="video", name="SP01.mkv",
-           relative_path="BD/[VCB] Bocchi/SPs/SP01.mkv", resolution="1920x1080",
-           video_codec="hevc", color_depth="10bit", hdr=None, bitrate=12_000_000,
-           audio_tracks=[{"codec": "flac", "lang": "jpn"}],
-           subtitle_tracks=[{"codec": "ass", "lang": "chs"}])
-    from app.api.bd import bd_release_detail as bd_release_out
-    v = bd_release_out(r)["videos"][0]
-    assert v["source"] == "BD" and v["codec"] == "hevc" and v["color_depth"] == "10bit"
-    assert v["resolution"] == "1920x1080" and v["label"] == "特别动画"
-    assert v["audio_tracks"] and v["subtitle_tracks"]
+    out = bd_api.bd_release_out(r)
+    assert out["source_kind"] == "bdrip" and out["has_discs"] is False
+    assert out["open_url"] and "reveal" in out["open_url"]   # mikanarr://reveal?path=...
+    for gone in ("extra_count", "image_books", "audio_albums", "videos",
+                 "image_count", "video_count"):
+        assert gone not in out
 
 
 # ---- 生命周期 ----------------------------------------------------------------
@@ -199,23 +164,6 @@ def test_evaluate_airing_skips_without_mikan_id(db, monkeypatch):
 def test_bd_video_discriminator(name, is_extra):
     from app.services.bd_scan import bd_is_extra_video
     assert bd_is_extra_video(name) is is_extra
-
-
-def test_release_summary_counts(db):
-    _, r = _bdrip(db)
-    _extra(db, r, category="scans", media_kind="image", name="001.jpg",
-           relative_path="BD/x/Scans/Vol.1/001.jpg")
-    _extra(db, r, category="scans", media_kind="image", name="002.jpg",
-           relative_path="BD/x/Scans/Vol.1/002.jpg")
-    _extra(db, r, category="audio", media_kind="audio", name="01.flac",
-           relative_path="BD/x/CDs/A/01.flac", track_no=1)
-    _extra(db, r, category="other", media_kind="video", name="SP.mkv",
-           relative_path="BD/x/SP.mkv")
-    from app.api.bd import bd_release_summary
-    s = bd_release_summary(r)
-    assert s["image_count"] == 2 and s["image_book_count"] == 1
-    assert s["audio_count"] == 1 and s["audio_album_count"] == 1
-    assert s["video_count"] == 1 and s["extra_count"] == 4
 
 
 def test_heal_bd_extras_removes_mismapped_keeps_main(db):

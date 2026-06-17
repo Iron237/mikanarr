@@ -1,11 +1,12 @@
-"""BD 发行扫描(ADR-0004):把 BD 当「发行实体 + 特典」管理,与剧集/VideoFile 解耦。
+"""BD 发行扫描(ADR-0004):把 BD 当「发行实体」管理,与剧集/VideoFile 解耦。
 
 两类来源:
-- 下载根里 片源=BD 的合集(BDRip)→ bd_release(bdrip, owned=false)+ 逐项分类特典。
+- 下载根里 片源=BD 的合集(BDRip)→ bd_release(bdrip, owned=false)。
 - 已购原盘目录 /bd-owned(MAKEMKV 原盘)→ bd_release(raw_disc, owned=true),v1 仅占位
   (碟数+总大小),不拆 m2ts。
 
-正片不进特典(仍走剧集网格);特典含非视频(FLAC 音频 / JPG 图集·扫描)。
+去特典分支:正片(纯集号)走剧集网格替换 web;特典(带描述标签的视频 / 音频 / 图集·扫描)不再
+入库编目、不在网页展示——留在发行目录里,经详情页「打开目录」(mikanarr://reveal)用资源管理器浏览。
 番剧绑定:仅匹配「已存在」的番剧(按净化标题),匹配不到留空待手动绑(不自动 Mikan 建,避免错绑)。
 """
 from __future__ import annotations
@@ -13,20 +14,19 @@ from __future__ import annotations
 import logging
 import re
 import threading
-from pathlib import Path, PurePosixPath
+from pathlib import Path
 
 from sqlalchemy import select
 
 from app.config import settings
 from app.database import db_session
-from app.models import Bangumi, BdExtra, BdRelease
+from app.models import Bangumi, BdRelease
 from app.parsers.title_parser import detect_source, parse
-from app.services import media_probe
 
 log = logging.getLogger(__name__)
 
 state: dict = {"running": False, "phase": "", "done": 0, "total": 0, "current": "",
-               "releases": 0, "extras": 0, "error": None}
+               "releases": 0, "error": None}
 
 _VIDEO_EXT = {".mkv", ".mp4", ".m2ts", ".ts", ".avi", ".wmv", ".mov", ".flv", ".m4v"}
 _AUDIO_EXT = {".flac", ".wav", ".mp3", ".m4a", ".aac", ".ape", ".dsf", ".dts", ".tak", ".wv"}
@@ -90,31 +90,6 @@ def _media_kind(ext: str) -> str | None:
     if e in _IMAGE_EXT:
         return "image"
     return None
-
-
-def _classify(rel: PurePosixPath) -> tuple[str, str] | None:
-    """发行内相对路径 → (类别, 媒体种类);返回 None 表示「正片/非媒体」应跳过。"""
-    kind = _media_kind(rel.suffix)
-    if kind is None:
-        return None
-    # 先看所在子目录(发行根下任一层)
-    for seg in rel.parts[:-1]:
-        for rx, cat in _CAT_DIR:
-            if rx.search(seg):
-                return cat, kind
-    # 再看文件名标记
-    for rx, cat in _CAT_FILE:
-        if rx.search(rel.name):
-            return cat, kind
-    # 顶层视频:BD 不靠 web 集号——纯集号(去字幕组/技术标签/标题后只剩数字)=正片→跳过交剧集网格;
-    # 带任何描述标签(BOCCHI THE TALK!/Road to…/IV 等未命中上面关键词的)=特典,归「其他映像特典」
-    if kind == "video":
-        if bd_extra_label(rel.name) is None:
-            return None        # 纯集号正片,跳过
-        return "other", "video"
-    if kind == "image":
-        return "scans", "image"   # 散落图片当扫描/图集
-    return "other", kind
 
 
 # ---- BD 正片/特典判别(不靠 web 集号:纯集号=正片,带描述标签=特典)----------------
@@ -256,69 +231,26 @@ def _upsert_release(db, *, bangumi_id, title, source_kind, root_rel, owned,
     return r
 
 
-def _scan_bdrip_release(db, b, release_dir: Path, root: Path) -> int:
-    """登记一个 BDRip 发行 + 分类其特典。返回新增特典数。"""
+def _scan_bdrip_release(db, b, release_dir: Path, root: Path) -> None:
+    """登记一个 BDRip 发行(发行实体 + 总大小);去特典分支:不再编目特典。
+
+    特典(带描述标签的视频 / 音频 / 图集)不入库、不在网页展示,留在发行目录里经「打开目录」
+    浏览;这里顺带清掉历史扫描可能留下的 BdExtra 行,使库与新口径一致。
+    """
     root_rel = str(release_dir.relative_to(root)).replace("\\", "/")
-    files = [p for p in release_dir.rglob("*") if p.is_file()]
     total = 0
-    for p in files:
-        try:
-            total += p.stat().st_size
-        except OSError:
-            pass
+    for p in release_dir.rglob("*"):
+        if p.is_file():
+            try:
+                total += p.stat().st_size
+            except OSError:
+                pass
     rel_obj = _upsert_release(
         db, bangumi_id=(b.id if b else None), title=release_dir.name,
         source_kind="bdrip", root_rel=root_rel, owned=False, disc_count=1, total_size=total)
-    existing = {e.relative_path: e for e in rel_obj.extras}
-    valid: set[str] = set()
-    added = 0
-    for p in files:
-        within = p.relative_to(release_dir)
-        cat = _classify(PurePosixPath(within.as_posix()))
-        if cat is None:
-            continue
-        category, kind = cat
-        file_rel = str(p.relative_to(root)).replace("\\", "/")
-        valid.add(file_rel)
-        if file_rel in existing:
-            continue
-        ex = BdExtra(bd_release_id=rel_obj.id, category=category, media_kind=kind,
-                     name=p.name, relative_path=file_rel)
-        try:
-            ex.size = p.stat().st_size
-        except OSError:
-            pass
-        if kind == "video":
-            # 视频特典:完整探测,详情页复用正片 FileTags 显全规格(编码/色深/HDR/音轨/字幕轨)
-            try:
-                r = media_probe.probe(p)
-                ex.resolution = r.resolution or parse(p.name).resolution
-                ex.video_codec = r.video_codec
-                ex.color_depth = r.color_depth
-                ex.hdr = r.hdr
-                ex.bitrate = r.bitrate
-                ex.duration = r.duration
-                ex.audio_tracks = r.audio_tracks
-                ex.subtitle_tracks = r.subtitle_tracks
-            except Exception:  # noqa: BLE001 — 探测失败不阻塞
-                ex.resolution = parse(p.name).resolution
-        elif kind == "audio":
-            # 音频特典(CD):读标签做歌单(曲目号/标题/时长)
-            try:
-                a = media_probe.probe_audio(p)
-                ex.duration = a.duration
-                ex.track_no = a.track_no
-                ex.track_title = a.track_title
-            except Exception:  # noqa: BLE001 — 探测失败不阻塞
-                pass
-        db.add(ex)
-        added += 1
-    # 剪除旧扫描遗留的失效特典:文件已删,或判别修正后现判为正片/技术标签(如 DBD 式纯集号主集)
-    for path, e in existing.items():
-        if path not in valid:
-            db.delete(e)
+    for e in list(rel_obj.extras):   # 清历史特典编目(改由「打开目录」浏览)
+        db.delete(e)
     db.flush()
-    return added
 
 
 def _cleanup_container_release(db, folder: Path, root: Path) -> None:
@@ -366,7 +298,7 @@ def _scan_download_root(db) -> None:
                 if b is None and existing is None:
                     b = _auto_bind(db, rel_dir.name)
             try:
-                state["extras"] += _scan_bdrip_release(db, b, rel_dir, root)
+                _scan_bdrip_release(db, b, rel_dir, root)
                 state["releases"] += 1
             except Exception as e:  # noqa: BLE001
                 log.warning("BD 扫描 %s 失败: %s", rel_dir.name, e)
@@ -402,14 +334,14 @@ def _scan_owned_discs(db) -> None:
 
 def _run() -> None:
     state.update(running=True, phase="扫描 BD", done=0, total=0, current="",
-                 releases=0, extras=0, error=None)
+                 releases=0, error=None)
     try:
         with db_session() as db:
             state["phase"] = "扫描下载根 BDRip"
             _scan_download_root(db)
             state["phase"] = "扫描已购原盘"
             _scan_owned_discs(db)
-        log.info("BD 扫描完成:发行 %s 套,特典 %s 项", state["releases"], state["extras"])
+        log.info("BD 扫描完成:发行 %s 套", state["releases"])
     except Exception as e:  # noqa: BLE001
         state["error"] = str(e)
         log.exception("BD 扫描失败")
