@@ -90,6 +90,7 @@ def _migrate_columns() -> None:
                        ("source", "VARCHAR(32)"),
                        ("color_depth", "VARCHAR(8)"),
                        ("hdr", "VARCHAR(16)")],
+        "bd_release": [("manual_import", "BOOLEAN DEFAULT 0")],
         "bd_extra": [("video_codec", "VARCHAR(32)"),
                      ("color_depth", "VARCHAR(8)"),
                      ("hdr", "VARCHAR(16)"),

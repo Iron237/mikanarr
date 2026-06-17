@@ -3,10 +3,12 @@ import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { api } from '../api'
 import Icon from '../components/Icon.vue'
 import BdReleases from '../components/BdReleases.vue'
+import BdImportWizard from '../components/BdImportWizard.vue'
 
 const releases = ref([])
 const bangumiList = ref([])
 const scan = ref(null)
+const importReleases = ref(null)   // 非空 = 打开正片导入向导(传入的发行数组)
 const filter = ref('all')          // all | owned | unowned | unbound
 let scanTimer = null
 let mounted = true
@@ -54,6 +56,7 @@ async function del(r) {
   if (!confirm(`移除 BD 记录「${r.title}」?(只删库记录,不动磁盘文件)`)) return
   await api.delete(`/api/bd/releases/${r.id}`); await reload()
 }
+function onImported() { importReleases.value = null; reload() }
 const SRC = { bdrip: ['BDRip', 'accent'], raw_disc: ['自购原盘', 'green'] }
 </script>
 
@@ -114,8 +117,11 @@ const SRC = { bdrip: ['BDRip', 'accent'], raw_disc: ['自购原盘', 'green'] }
         </div>
       </div>
       <!-- 打开目录:特典留在发行目录里,用资源管理器 / 本机应用浏览(自购原盘可逐碟 PowerDVD)-->
-      <BdReleases :releases="[r]" :show-header="false" />
+      <BdReleases :releases="[r]" :show-header="false" @import="ir => importReleases = [ir]" />
     </div>
+
+    <BdImportWizard v-if="importReleases" :releases="importReleases"
+                    @close="importReleases = null" @done="onImported" />
   </div>
 </template>
 

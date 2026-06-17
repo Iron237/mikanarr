@@ -240,12 +240,18 @@ def _heal_bd_extras(db) -> int:
         BdRelease.bangumi_id.isnot(None))).scalars())
     if not bd_bangumi:
         return 0
+    # 手动导入的发行:正片由向导权威指定(可能特意纳入名字像特典的正片)→ 自愈不得插手
+    manual_roots = [r.root_path for r in db.execute(select(BdRelease).where(
+        BdRelease.manual_import.is_(True))).scalars()]
     rows = db.execute(select(VideoFile).join(Torrent).join(Subscription).where(
         Subscription.bangumi_id.in_(bd_bangumi), VideoFile.episode_id.isnot(None))).scalars().all()
     removed = 0
     touched: set[int] = set()
     for vf in rows:
-        if bd_is_extra_video(PurePosixPath(vf.relative_path).name):
+        rp = vf.relative_path
+        if any(rp == mr or rp.startswith(mr + "/") for mr in manual_roots):
+            continue   # 手动导入发行内的文件,尊重手动指定
+        if bd_is_extra_video(PurePosixPath(rp).name):
             touched.add(vf.episode_id)
             db.delete(vf)
             removed += 1
@@ -295,6 +301,14 @@ def _scan_work(work_dir: Path, root: Path, create: bool = True) -> None:
         if b is None:
             state["unmatched"].append(work_dir.name)
             return
+        # 已手动导入正片的 BD 发行:尊重导入向导的权威映射,库扫描不再自动登记其正片
+        if is_bd:
+            rel_root = str(work_dir.relative_to(root)).replace("\\", "/")
+            rb = db.execute(select(BdRelease).where(
+                BdRelease.root_path == rel_root)).scalar_one_or_none()
+            if rb and rb.manual_import:
+                log.info("库扫描:%s 已手动导入正片,跳过自动登记", work_dir.name)
+                return
         t = _container_torrent(db, b)
         n = upd = 0
         touched_eps: set[int] = set()

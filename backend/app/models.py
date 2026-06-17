@@ -226,6 +226,8 @@ class BdRelease(Base):
     owned: Mapped[bool] = mapped_column(Boolean, default=False)   # 已购买(有碟)
     disc_count: Mapped[int] = mapped_column(Integer, default=1)
     total_size: Mapped[int | None] = mapped_column(Integer)    # 字节(SQLite INTEGER 为 64 位)
+    # 正片导入向导已对该发行做过权威映射 → 库扫描不再自动登记其正片(尊重手动指定)
+    manual_import: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 
     extras: Mapped[list[BdExtra]] = relationship(

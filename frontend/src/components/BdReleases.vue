@@ -10,6 +10,7 @@ const props = defineProps({
   releases: { type: Array, default: () => [] },   // 发行实体数组(含 open_url / has_discs)
   showHeader: { type: Boolean, default: true },    // 是否渲染发行标题行(BD 库页自带管理行则关)
 })
+const emit = defineEmits(['import'])   // 正片导入:交父级打开导入向导
 
 const SRC_BADGE = { bdrip: ['BDRip', 'accent'], raw_disc: ['自购原盘', 'green'] }
 function open(url) { if (url) requestNative(url) }
@@ -40,8 +41,14 @@ async function toggleDiscs(r) {
       <span v-if="r.total_size" class="tag">{{ fmtSize(r.total_size) }}</span>
     </div>
 
-    <!-- 打开目录:特典留在发行目录里,用资源管理器 / 本机应用浏览 -->
+    <!-- 正片导入 + 打开目录:正片经向导按集号登记替换 web;特典留在发行目录里用本机应用浏览 -->
     <div class="row bd-actions">
+      <button v-if="r.source_kind === 'bdrip' && r.bangumi_id" class="btn xs primary"
+              title="把该发行的视频按集号登记为正片(替换 web);支持自动匹配 + 逐个手动指定"
+              @click="emit('import', r)">
+        <Icon name="download" :size="13" /> 正片导入
+      </button>
+      <span v-if="r.manual_import" class="tag green" title="已用向导手动导入正片;库扫描不再自动改这套">已手动导入</span>
       <button class="btn xs" :disabled="!r.open_url" title="在资源管理器中定位该发行目录(特典就在其中)"
               @click="open(r.open_url)">
         <Icon name="folder-open" :size="13" /> 打开目录

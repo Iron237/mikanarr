@@ -59,6 +59,7 @@ def bd_release_out(r: BdRelease) -> dict:
         "id": r.id, "title": r.title, "source_kind": r.source_kind, "owned": r.owned,
         "disc_count": r.disc_count, "total_size": r.total_size, "bangumi_id": r.bangumi_id,
         "has_discs": r.source_kind == "raw_disc", "open_url": _open_url(r),
+        "manual_import": r.manual_import,
     }
 
 
@@ -84,6 +85,163 @@ def release_detail(release_id: int, db: Session = Depends(get_db)):
     if not r:
         raise HTTPException(404)
     return {"id": r.id, "discs": _owned_discs(r)}
+
+
+def _require_bdrip_bound(db: Session, release_id: int) -> BdRelease:
+    r = db.get(BdRelease, release_id)
+    if not r:
+        raise HTTPException(404)
+    if r.source_kind != "bdrip":
+        raise HTTPException(400, "仅 BDRip 发行支持正片导入")
+    if not r.bangumi_id:
+        raise HTTPException(400, "请先绑定番剧再导入正片")
+    return r
+
+
+@router.get("/releases/{release_id}/candidates")
+def import_candidates(release_id: int, db: Session = Depends(get_db)):
+    """正片导入向导:列发行目录内全部视频 + 每个的自动猜测(集号 / 是否特典)+ 当前登记。
+
+    弃用「后台自动判断」,改由用户在向导里逐个确认:返回 guess(按文件名序号)作为预填,
+    用户可改集号 / 标为特典(不导入)。同时返回该番已有正片集号,供参考。
+    """
+    from pathlib import Path
+
+    from app.parsers.title_parser import parse
+    from app.models import Episode, EpisodeType, Subscription, Torrent, VideoFile
+    from app.services import media_probe
+    from app.services.bd_scan import bd_is_extra_video
+
+    r = _require_bdrip_bound(db, release_id)
+    b = db.get(Bangumi, r.bangumi_id)
+    root = Path(settings.download_root_local)
+    rel_dir = root / r.root_path
+    try:
+        vids = sorted([p for p in rel_dir.rglob("*")
+                       if p.is_file() and media_probe.is_video(p)], key=lambda p: p.name)
+    except OSError:
+        vids = []
+    # 该番在本发行目录下的现有登记(显示「当前第几集」+ 预选)
+    cur = {vf.relative_path: vf for vf in db.execute(
+        select(VideoFile).join(Torrent).join(Subscription).where(
+            Subscription.bangumi_id == b.id)).scalars()
+        if vf.relative_path == r.root_path or vf.relative_path.startswith(r.root_path + "/")}
+    files = []
+    for p in vids:
+        rel = str(p.relative_to(root)).replace("\\", "/")
+        parsed = parse(p.name)
+        guess = parsed.episodes[0] if len(parsed.episodes) == 1 and parsed.episodes[0] > 0 else None
+        vf = cur.get(rel)
+        cur_num = None
+        if vf and vf.episode_id:
+            ep = db.get(Episode, vf.episode_id)
+            cur_num = ep.number if ep else None
+        try:
+            size = p.stat().st_size
+        except OSError:
+            size = None
+        files.append({
+            "path": rel, "name": p.name, "size": size,
+            "guess_number": guess, "guess_extra": bd_is_extra_video(p.name),
+            "current_number": cur_num, "registered": vf is not None,
+        })
+    eps = db.execute(select(Episode).where(
+        Episode.bangumi_id == b.id, Episode.type == EpisodeType.REGULAR)).scalars().all()
+    return {
+        "release": {"id": r.id, "title": r.title, "manual_import": r.manual_import},
+        "bangumi": {"id": b.id, "title": b.title, "eps_total": b.eps_total,
+                    "episodes": sorted(e.number for e in eps if e.number is not None)},
+        "files": files,
+    }
+
+
+@router.post("/releases/{release_id}/import")
+def import_main(release_id: int, payload: dict, db: Session = Depends(get_db)):
+    """正片导入(向导,对该发行权威):assignments=[{path, episode_number}] 把选中的 BD 文件
+    登记/重映射为该番正片(source=BD,version-switch 替换 web);该发行目录下未被选中的已登记
+    BD 文件移出剧集网格(删登记,不动磁盘)。导入后标 manual_import,库扫描不再自动改这套发行。
+    """
+    from pathlib import Path, PurePosixPath
+
+    from app.parsers.title_parser import parse
+    from app.models import Episode, EpisodeType, Subscription, Torrent, TorrentEpisode, VideoFile
+    from app.services.library_scan import _container_torrent, _probe_into
+    from app.services.postprocess import _apply_version_switch
+
+    r = _require_bdrip_bound(db, release_id)
+    b = db.get(Bangumi, r.bangumi_id)
+    root = Path(settings.download_root_local)
+
+    want: dict[str, float] = {}   # rel_path -> 集号
+    for a in (payload.get("assignments") or []):
+        path, num = a.get("path"), a.get("episode_number")
+        if not path or num in (None, ""):
+            continue
+        try:
+            want[path] = float(num)
+        except (TypeError, ValueError):
+            raise HTTPException(400, f"集号非法:{num}") from None
+
+    t = _container_torrent(db, b)
+    # 该番在本发行目录下现有的 BD 登记(权威重映射/移除的对象)
+    cur = {vf.relative_path: vf for vf in db.execute(
+        select(VideoFile).join(Torrent).join(Subscription).where(
+            Subscription.bangumi_id == b.id)).scalars()
+        if vf.relative_path == r.root_path or vf.relative_path.startswith(r.root_path + "/")}
+
+    touched: set[int] = set()
+    imported = removed = 0
+    for path, number in want.items():
+        ep = db.execute(select(Episode).where(
+            Episode.bangumi_id == b.id, Episode.type == EpisodeType.REGULAR,
+            Episode.number == number)).scalars().first()
+        if ep is None:
+            ep = Episode(bangumi_id=b.id, number=number, type=EpisodeType.REGULAR)
+            db.add(ep)
+            db.flush()
+        vf = cur.get(path)
+        if vf is None:
+            abspath = root / path
+            vf = VideoFile(torrent_id=t.id, relative_path=path, source="BD",
+                           subgroup=parse(PurePosixPath(path).name).group)
+            try:
+                vf.size = abspath.stat().st_size
+            except OSError:
+                pass
+            db.add(vf)
+            db.flush()
+            _probe_into(vf, abspath, parse(PurePosixPath(path).name).resolution)
+            imported += 1
+        elif vf.source != "BD":
+            vf.source = "BD"
+        old_ep = vf.episode_id
+        vf.episode_id = ep.id
+        if not db.get(TorrentEpisode, (vf.torrent_id, ep.id)):
+            db.add(TorrentEpisode(torrent_id=vf.torrent_id, episode_id=ep.id))
+        touched.add(ep.id)
+        if old_ep and old_ep != ep.id:
+            touched.add(old_ep)
+    # 未选中的该发行 BD 文件 → 移出剧集网格(不动磁盘)
+    for path, vf in cur.items():
+        if path in want:
+            continue
+        if vf.episode_id:
+            touched.add(vf.episode_id)
+        db.delete(vf)
+        removed += 1
+
+    db.flush()
+    for ep_id in touched:
+        _apply_version_switch(db, ep_id)
+    r.manual_import = True
+    db.flush()
+    try:   # 可能令该番全 BD 完成 → 收尾(停扫/停订阅/删冗余 web)
+        from app.services.lifecycle import on_torrent_processed
+        on_torrent_processed(db, b.id)
+    except Exception:  # noqa: BLE001 — 生命周期失败不影响导入结果
+        pass
+    db.commit()
+    return {"ok": True, "imported": imported, "remapped": len(want), "removed": removed}
 
 
 @router.post("/scan")

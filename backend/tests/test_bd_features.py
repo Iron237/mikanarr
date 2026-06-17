@@ -194,3 +194,52 @@ def test_heal_bd_extras_removes_mismapped_keeps_main(db):
     assert _heal_bd_extras(db) == 1
     assert db.get(VideoFile, extra.id) is None     # 短剧特典移出剧集
     assert db.get(VideoFile, main.id) is not None  # 纯集号正片保留
+
+
+# ---- 正片导入向导(手动指定 / 自动匹配,对发行权威)----------------------------
+def test_import_candidates_requires_binding(db):
+    """未绑定番剧的发行不能导入正片(向导先要求绑定)。"""
+    from fastapi import HTTPException
+
+    from app.api.bd import import_candidates
+    r = BdRelease(title="rel", source_kind="bdrip", root_path="x/rel", owned=False)
+    db.add(r)
+    db.flush()
+    with pytest.raises(HTTPException):
+        import_candidates(r.id, db)
+
+
+def test_import_main_authoritative(db, monkeypatch):
+    """导入向导对该发行权威:选中→映射为正片;未选的已登记 BD 文件移出网格;并标 manual_import。"""
+    monkeypatch.setattr("app.services.lifecycle.on_torrent_processed", lambda *a, **k: None)
+    from app.api.bd import import_main
+    from app.services.local_import import LOCAL_SUBGROUP_ID
+    b = Bangumi(mikan_bangumi_id=5, title="番", eps_total=2)
+    db.add(b)
+    db.flush()
+    r = BdRelease(bangumi_id=b.id, title="rel", source_kind="bdrip",
+                  root_path="番/rel", owned=False)
+    sub = Subscription(bangumi_id=b.id, mikan_subgroup_id=LOCAL_SUBGROUP_ID,
+                       enabled=False, save_path="/d")
+    db.add_all([r, sub])
+    db.flush()
+    t = Torrent(subscription_id=sub.id, guid="library:5", title_raw="x", torrent_url="",
+                status=TorrentStatus.ARCHIVED)
+    db.add(t)
+    db.flush()
+    e1 = Episode(bangumi_id=b.id, number=1.0, type=EpisodeType.REGULAR)
+    db.add(e1)
+    db.flush()
+    f_main = VideoFile(torrent_id=t.id, episode_id=e1.id, source="BD", is_active=True,
+                       relative_path="番/rel/[VCB] 番 [01].mkv")
+    f_bogus = VideoFile(torrent_id=t.id, episode_id=e1.id, source="BD", is_active=False,
+                        relative_path="番/rel/[VCB] 番 [Menu01].mkv")
+    db.add_all([f_main, f_bogus])
+    db.flush()
+    res = import_main(r.id, {"assignments": [
+        {"path": "番/rel/[VCB] 番 [01].mkv", "episode_number": 1}]}, db)
+    assert res["removed"] == 1 and res["remapped"] == 1
+    assert db.get(VideoFile, f_bogus.id) is None      # 未选为正片 → 移出剧集网格
+    assert db.get(VideoFile, f_main.id) is not None   # 选中 → 保留为正片
+    db.refresh(r)
+    assert r.manual_import is True                     # 标记后库扫描不再自动改这套
