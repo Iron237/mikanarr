@@ -16,6 +16,8 @@ log = logging.getLogger(__name__)
 PROBE_TIMEOUT = 60
 VIDEO_EXTS = {".mkv", ".mp4", ".avi", ".ts", ".webm", ".mov", ".flv", ".wmv", ".m2ts"}
 SUB_EXTS = {".ass", ".ssa", ".srt", ".sup", ".vtt", ".sub", ".idx", ".pgs"}
+AUDIO_EXTS = {".flac", ".wav", ".mp3", ".m4a", ".aac", ".ape", ".dsf", ".dts",
+              ".tak", ".wv", ".ogg", ".opus", ".tta"}
 
 
 @dataclass
@@ -25,12 +27,49 @@ class ProbeResult:
     color_depth: str | None = None       # "8bit" / "10bit" / "12bit"
     hdr: str | None = None               # "HDR10" / "HLG" / "DV";None=SDR
     bitrate: int | None = None           # bps
+    duration: float | None = None        # 秒(format.duration)
     audio_tracks: list[dict] = field(default_factory=list)     # {codec, lang, title, channels}
     subtitle_tracks: list[dict] = field(default_factory=list)  # {codec, lang, title, source}
 
 
+@dataclass
+class AudioMeta:
+    """音频特典(CD)标签元数据,用于歌单排序/展示。"""
+    duration: float | None = None        # 秒
+    track_no: int | None = None          # 曲目号
+    track_title: str | None = None       # 曲目标题
+    artist: str | None = None
+
+
 def is_video(path: str | Path) -> bool:
     return Path(path).suffix.lower() in VIDEO_EXTS
+
+
+def is_audio(path: str | Path) -> bool:
+    return Path(path).suffix.lower() in AUDIO_EXTS
+
+
+_TRACK_NUM = re.compile(r"\d+")
+
+
+def probe_audio(path: Path) -> AudioMeta:
+    """读音频文件标签(曲目号/标题/时长/艺术家)。探测失败抛异常,由调用方兜底。"""
+    cmd = ["ffprobe", "-v", "error", "-print_format", "json", "-show_format", str(path)]
+    out = subprocess.run(cmd, capture_output=True, timeout=PROBE_TIMEOUT, check=True)
+    fmt = json.loads(out.stdout).get("format", {}) or {}
+    tags = {str(k).lower(): v for k, v in (fmt.get("tags") or {}).items()}
+    m = AudioMeta()
+    try:
+        if fmt.get("duration"):
+            m.duration = round(float(fmt["duration"]), 1)
+    except (TypeError, ValueError):
+        pass
+    track = tags.get("track") or tags.get("tracknumber")   # 常见 "3" / "03" / "3/12"
+    if track and (mt := _TRACK_NUM.search(str(track))):
+        m.track_no = int(mt.group())
+    m.track_title = tags.get("title") or None
+    m.artist = tags.get("artist") or tags.get("album_artist") or None
+    return m
 
 
 # ---- 字段推导 --------------------------------------------------------------
@@ -128,6 +167,11 @@ def probe(path: Path) -> ProbeResult:
     fmt = data.get("format", {})
     if br := fmt.get("bit_rate"):
         result.bitrate = int(br)
+    try:
+        if fmt.get("duration"):
+            result.duration = round(float(fmt["duration"]), 1)
+    except (TypeError, ValueError):
+        pass
 
     for s in data.get("streams", []):
         tags = s.get("tags", {}) or {}

@@ -249,6 +249,9 @@ onUnmounted(() => { mounted = false; clearTimeout(scanTimer); clearTimeout(autoT
             <div v-else class="poster-fallback">{{ b.title.slice(0, 2) }}</div>
             <span v-if="b.kind === 'tv' && b.airing_status === 'airing'" class="airing-badge">连载中</span>
             <span v-if="b.auto_best" class="auto-badge" title="已开启智能下载(定期扫描升级)"><Icon name="zap" :size="11" /></span>
+            <!-- 源角标(右下角,像剧场版那样):自购原盘优先,其次正片已全替为 BDrip -->
+            <span v-if="b.bd_owned" class="src-badge owned" title="自购原盘(收藏,跳 PowerDVD)">原盘BD</span>
+            <span v-else-if="b.bd_rip" class="src-badge rip" title="正片已替换为 BDrip">BDrip</span>
             <!-- TV 显示集进度;剧场版/OVA 不是集概念 → 显示形态分类(已入库/未入库) -->
             <div class="ep-badge" v-if="b.kind === 'tv' && b.eps_total">{{ b.eps_downloaded }}/{{ b.eps_total }}</div>
             <div class="ep-badge kind" v-else-if="b.kind && b.kind !== 'tv'" :class="{ dim: !b.has_resource }">
@@ -376,6 +379,12 @@ onUnmounted(() => { mounted = false; clearTimeout(scanTimer); clearTimeout(autoT
 }
 .ep-badge.kind { color: var(--blue); font-weight: 700; }
 .ep-badge.kind.dim { color: var(--text-dim); }
+.src-badge {
+  position: absolute; bottom: 0; left: 0; font-size: 11px; font-weight: 700;
+  padding: 2px 8px; border-top-right-radius: 8px; background: rgba(0,0,0,.75);
+}
+.src-badge.owned { color: var(--green); }
+.src-badge.rip { color: var(--accent); }
 .info { padding: 10px 12px 12px; }
 .title {
   font-weight: 600; font-size: 13.5px; white-space: nowrap;

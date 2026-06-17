@@ -277,7 +277,10 @@ def _import_group(group: dict) -> str:
             db.flush()
             p = parse(src.name)
             vf.subgroup = p.group
-            vf.source = p.source
+            # 片源:文件名优先,判不出则继承源文件夹名上下文(如 [VCB-Studio]…[Ma10p_1080p]
+            # 整夹是 BD,内部文件名可能不带 BD 标记)→ 否则 source=None 会排在 Web 之后顶不掉 Web
+            from app.parsers.title_parser import detect_source
+            vf.source = p.source or detect_source(src.parent.name)
             # 按 ep_type 归类(影片/OVA 不归集留作影片本体;SP/特典走对应类型,不占正片集号)。
             # 复用库扫描的同一映射逻辑,三个导入入口行为一致。
             from app.services.library_scan import _map_episode

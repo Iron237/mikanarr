@@ -52,6 +52,9 @@ def library(db: Session = Depends(get_db)):
         "eps_downloaded": _eps_done(db, b),
         "has_bd": _has_source(db, b.id, "BD"),
         "has_web": _has_source(db, b.id, "Web"),
+        # 封面墙右下角「源」角标:原盘(自购)优先,其次正片已全替为 BDrip
+        "bd_owned": b.bd_owned,
+        "bd_rip": _has_active_file_source(db, b.id, "BD"),
     } for b in rows]
 
 
@@ -72,6 +75,11 @@ def _has_source(db: Session, bangumi_id: int, source: str) -> bool:
     if source == "BD" and db.execute(select(BdRelease.id).where(
             BdRelease.bangumi_id == bangumi_id).limit(1)).first():
         return True
+    return _has_active_file_source(db, bangumi_id, source)
+
+
+def _has_active_file_source(db: Session, bangumi_id: int, source: str) -> bool:
+    """该番剧是否有指定片源的 active 视频文件(不认 BD 发行记录,用于「BDrip 已替换正片」角标)。"""
     return bool(db.execute(
         select(VideoFile.id).join(Torrent).join(Subscription)
         .where(Subscription.bangumi_id == bangumi_id, VideoFile.is_active.is_(True),
@@ -175,11 +183,12 @@ def detail(bangumi_id: int, db: Session = Depends(get_db)):
 
 
 def _bd_releases_out(db: Session, bangumi_id: int) -> list[dict]:
-    from app.api.bd import bd_release_out
+    """详情页只返发行概要(计数),特典按发行懒加载(GET /api/bd/releases/{id})。"""
+    from app.api.bd import bd_release_summary
     from app.models import BdRelease
     rows = db.execute(select(BdRelease).where(
         BdRelease.bangumi_id == bangumi_id)).scalars().all()
-    return [bd_release_out(r) for r in rows]
+    return [bd_release_summary(r) for r in rows]
 
 
 def _sub_source(s: Subscription) -> str:

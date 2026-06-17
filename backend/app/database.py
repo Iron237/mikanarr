@@ -90,6 +90,15 @@ def _migrate_columns() -> None:
                        ("source", "VARCHAR(32)"),
                        ("color_depth", "VARCHAR(8)"),
                        ("hdr", "VARCHAR(16)")],
+        "bd_extra": [("video_codec", "VARCHAR(32)"),
+                     ("color_depth", "VARCHAR(8)"),
+                     ("hdr", "VARCHAR(16)"),
+                     ("bitrate", "INTEGER"),
+                     ("audio_tracks", "JSON DEFAULT '[]'"),
+                     ("subtitle_tracks", "JSON DEFAULT '[]'"),
+                     ("duration", "FLOAT"),
+                     ("track_no", "INTEGER"),
+                     ("track_title", "VARCHAR(512)")],
     }
     with engine.connect() as conn:
         for table, cols in additions.items():

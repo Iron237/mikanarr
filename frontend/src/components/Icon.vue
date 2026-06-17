@@ -47,6 +47,7 @@ const ICONS = {
   clock: '<circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/>',
   database: '<ellipse cx="12" cy="5.5" rx="7.5" ry="3"/><path d="M4.5 5.5v12c0 1.7 3.4 3 7.5 3s7.5-1.3 7.5-3v-12"/><path d="M4.5 11.5c0 1.7 3.4 3 7.5 3s7.5-1.3 7.5-3"/>',
   'chevron-right': '<path d="M9 6l6 6-6 6"/>',
+  'chevron-left': '<path d="M15 6l-6 6 6 6"/>',
   'chevron-down': '<path d="M6 9l6 6 6-6"/>',
 }
 

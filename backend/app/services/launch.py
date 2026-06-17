@@ -154,11 +154,38 @@ if (action === "play") {
               .replace("__POWERDVD__", json.dumps(settings.powerdvd_path or "")))
 
 
-def installer_bat() -> str:
+_ORIGIN_RE = __import__("re").compile(r"^https?://[A-Za-z0-9.\-]+(?::\d+)?$")
+
+
+def _policy_lines(origin: str | None) -> tuple[str, str]:
+    """据来源地址生成「免询问」浏览器策略(Chrome+Edge,HKCU,免管理员)+ 收尾提示。
+
+    现代 Chrome/Edge 的外部协议对话框已无「始终允许」勾选框 → 每次唤起都弹窗。
+    AutoLaunchProtocolsFromOrigins 把 mikanarr 协议 + 本服务器地址列入免询问名单,根治弹窗。
+    origin 缺失/不合法 → 不写策略(仅注册协议),退回旧提示。"""
+    import json
+    if not origin or not _ORIGIN_RE.match(origin):
+        return "", ('echo If the browser asks to open Mikanarr, allow it.\r\n')
+    # JSON 列表策略:reg /d 内嵌引号用 \" 转义(reg.exe 的 argv 解析按字面引号还原)
+    js = json.dumps([{"protocol": "mikanarr", "allowed_origins": [origin]}],
+                    separators=(",", ":")).replace('"', '\\"')
+    lines = (
+        'reg add "HKCU\\Software\\Policies\\Google\\Chrome" /v AutoLaunchProtocolsFromOrigins '
+        f'/t REG_SZ /d "{js}" /f >nul 2>&1\r\n'
+        'reg add "HKCU\\Software\\Policies\\Microsoft\\Edge" /v AutoLaunchProtocolsFromOrigins '
+        f'/t REG_SZ /d "{js}" /f >nul 2>&1\r\n')
+    note = (f'echo Auto-launch whitelisted for {origin} (Chrome / Edge).\r\n'
+            'echo Restart your browser once, then play / open works with no popup.\r\n')
+    return lines, note
+
+
+def installer_bat(origin: str | None = None) -> str:
     """生成自安装 .bat:写入 JScript 处理器(%LOCALAPPDATA%\\mikanarr\\handler.js)+ 注册
-    mikanarr:// → wscript(无窗口闪)。全程不用 PowerShell:certutil 解 base64,reg 写注册表。"""
+    mikanarr:// → wscript(无窗口闪)+(给定 origin 时)写浏览器免询问策略,根治每次播放弹窗。
+    全程不用 PowerShell:certutil 解 base64,reg 写注册表。"""
     b64 = base64.b64encode(_handler_js().encode("ascii")).decode("ascii")   # 纯 ASCII
     cmd = 'wscript.exe \\"%DIR%\\handler.js\\" \\"%%1\\"'
+    policy, note = _policy_lines(origin)
     return (
         "@echo off\r\n"
         "setlocal\r\n"
@@ -173,11 +200,11 @@ def installer_bat() -> str:
         'reg add "HKCU\\Software\\Classes\\mikanarr" /v "URL Protocol" /t REG_SZ /d "" /f >nul\r\n'
         'reg add "HKCU\\Software\\Classes\\mikanarr\\shell\\open\\command" /ve /t REG_SZ '
         f'/d "{cmd}" /f >nul\r\n'
+        + policy +
         "echo.\r\n"
         "echo Mikanarr protocol handler installed (JScript via wscript - no console flash):\r\n"
         "echo   %DIR%\\handler.js\r\n"
-        "echo On first click the browser asks once to open Mikanarr - tick "
-        "\"Always allow\", then it is seamless.\r\n"
+        + note +
         "echo.\r\n"
         "pause\r\n"
     )

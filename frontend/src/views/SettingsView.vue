@@ -93,7 +93,8 @@ async function pollNow() { await api.post('/api/system/poll') }
 // 先保存配置(让 .bat 嵌入当前路径前缀 + 令牌),再下载自安装协议处理器
 async function downloadHandler() {
   await saveConfig()
-  window.location.href = '/api/launch/handler.bat'
+  // 带当前访问地址 → 安装器写浏览器免询问策略(根治每次播放弹窗)
+  window.location.href = `/api/launch/handler.bat?origin=${encodeURIComponent(window.location.origin)}`
 }
 
 // ---- 存储(NAS / SMB,可在此重配;复用首次向导的端点)----

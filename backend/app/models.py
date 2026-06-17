@@ -246,6 +246,17 @@ class BdExtra(Base):
     relative_path: Mapped[str] = mapped_column(String(1024))  # 相对下载根(串流端点用)
     size: Mapped[int | None] = mapped_column(Integer)
     resolution: Mapped[str | None] = mapped_column(String(32))   # 视频特典可探测
+    # 视频特典:完整规格(与 VideoFile 同口径,详情页复用正片 FileTags 展示)
+    video_codec: Mapped[str | None] = mapped_column(String(32))
+    color_depth: Mapped[str | None] = mapped_column(String(8))    # "8bit"/"10bit"
+    hdr: Mapped[str | None] = mapped_column(String(16))           # "HDR10"/"HLG"/"DV";None=SDR
+    bitrate: Mapped[int | None] = mapped_column(Integer)
+    audio_tracks: Mapped[list] = mapped_column(JSON, default=list)
+    subtitle_tracks: Mapped[list] = mapped_column(JSON, default=list)
+    # 音频特典(CD):标签元数据,用于歌单排序/展示
+    duration: Mapped[float | None] = mapped_column(Float)         # 秒(音频/视频)
+    track_no: Mapped[int | None] = mapped_column(Integer)         # 曲目号(标签 track)
+    track_title: Mapped[str | None] = mapped_column(String(512))  # 曲目标题(标签 title)
 
     release: Mapped[BdRelease] = relationship(back_populates="extras")
 

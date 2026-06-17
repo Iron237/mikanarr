@@ -118,6 +118,12 @@ def process_torrent(db: Session, torrent_id: int) -> None:
         rel_path = qf["name"].replace("\\", "/").lstrip("/")
         if not media_probe.is_video(rel_path):
             continue
+        # BD 特典(带描述标签的非正片:NCOP/Menu/短剧/TALK/Lyric…)不按 web 集号当正片;
+        # 交 BD 扫描就地收为特典(BdExtra),不在剧集网格登记。仅 BD 源生效,Web 走原逻辑不变。
+        from app.services.bd_scan import bd_is_extra_video
+        base = PurePosixPath(rel_path).name
+        if parse(base).source == "BD" and bd_is_extra_video(base):
+            continue
         vf = db.execute(select(VideoFile).where(
             VideoFile.torrent_id == t.id,
             VideoFile.relative_path == rel_path)).scalar_one_or_none()
@@ -174,6 +180,14 @@ def process_torrent(db: Session, torrent_id: int) -> None:
         db.rollback()
         log.warning("整理 #%s 异常(文件已入库,跳过整理): %s", t.id, e)
     log.info("后处理完成 #%s → archived", t.id)
+    # 生命周期:本次完成可能令该番完结(下满)或全 BD(补全完成)→ 即时转补全/收尾
+    try:
+        from app.services.lifecycle import on_torrent_processed
+        on_torrent_processed(db, t.subscription.bangumi_id if t.subscription else None)
+        db.commit()
+    except Exception:  # noqa: BLE001 — 生命周期失败不影响后处理结果
+        db.rollback()
+        log.exception("后处理生命周期处理失败 #%s", t.id)
 
 
 def _worker() -> None:

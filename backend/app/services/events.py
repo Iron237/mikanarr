@@ -59,3 +59,9 @@ def emit(event: str, torrent: Torrent) -> None:
         log.exception("通知组装失败")
         return
     threading.Thread(target=_send_all, args=(n,), daemon=True).start()
+
+
+def notify(event: str, title: str, message: str, poster_path: str | None = None) -> None:
+    """非种子级(番剧生命周期等)推送:复用通道分发与事件开关。失败只记日志。"""
+    n = Notification(event=event, title=title, message=message, poster_path=poster_path)
+    threading.Thread(target=_send_all, args=(n,), daemon=True).start()

@@ -17,16 +17,18 @@ import logging
 import re
 import threading
 from datetime import datetime, timezone
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 from sqlalchemy import or_, select
 
 from app.config import settings
 from app.database import db_session
-from app.models import (Bangumi, Episode, EpisodeType, Kind, Subscription, Torrent,
-                        TorrentEpisode, TorrentStatus, VideoFile)
+from app.models import (Bangumi, BdRelease, Episode, EpisodeType, Kind, Subscription,
+                        Torrent, TorrentEpisode, TorrentStatus, VideoFile)
 from app.parsers.title_parser import detect_source, parse
 from app.services import media_probe
+from app.services.bd_scan import (bd_is_extra_video, bd_subfolders, is_bd_release_dir,
+                                  is_extra_dir)
 from app.services.local_import import LOCAL_SUBGROUP_ID
 
 log = logging.getLogger(__name__)
@@ -37,6 +39,7 @@ state = {"running": False, "phase": "", "done": 0, "total": 0,
 
 _ILLEGAL = re.compile(r'[<>:"/\\|?*]')
 _NORM = re.compile(r"[\s·:：!！?？,，.。\-—_~、]+")
+_BRACKET = re.compile(r"\[[^\]]*\]")
 # 裸盘结构(蓝光 BDMV/STREAM、DVD VIDEO_TS):整盘,不逐文件当集登记
 _RAW_DISC_DIRS = {"BDMV", "STREAM", "VIDEO_TS"}
 
@@ -50,29 +53,38 @@ def _norm(name: str) -> str:
     return _NORM.sub("", (name or "").strip()).lower()
 
 
+def _clean(name: str) -> str:
+    """去掉 [字幕组]/[Ma10p_1080p] 等方括号段,取核心标题(VCB 式发行夹名才匹配得到番剧)。"""
+    return _BRACKET.sub(" ", name or "").strip()
+
+
 def _build_index(db) -> tuple[dict, dict]:
-    """已有番剧的标题索引:精确(净化标题)+ 归一化。"""
+    """已有番剧的标题索引:精确(净化标题)+ 归一化(含原名,便于罗马音/英文夹名匹配)。"""
     bs = db.execute(select(Bangumi)).scalars().all()
     exact, norm = {}, {}
     for b in bs:
         exact.setdefault(_safe(b.title), b)
         norm.setdefault(_norm(b.title), b)
+        if b.title_original:
+            norm.setdefault(_norm(b.title_original), b)
     return exact, norm
 
 
-def _match_or_create(db, folder: str) -> Bangumi | None:
-    """文件夹名 → Bangumi:先精确/归一化匹配已有,匹配不到用 Mikan 搜索创建。"""
+def _match_or_create(db, folder: str, create: bool = True) -> Bangumi | None:
+    """文件夹名 → Bangumi:先精确/归一化匹配已有(夹名原样 + 去方括号核心标题两种)。
+    create=False(容器下的 BD 发行)→ 只本地匹配,匹配不到返回 None,不按发行夹名误搜/误建番剧。"""
     from app.clients.mikan import mikan_client
     from app.services.metadata_service import enrich_bangumi
     from app.services.organize import detect_season
 
     exact, norm = _build_index(db)
-    b = exact.get(_safe(folder)) or norm.get(_norm(folder))
-    if b is not None:
+    core = _clean(folder)
+    b = exact.get(_safe(folder)) or norm.get(_norm(folder)) or (norm.get(_norm(core)) if core else None)
+    if b is not None or not create:
         return b
-    # 匹配不到 → Mikan 容错搜索创建(让库自动补全这部番剧)
+    # 匹配不到 → Mikan 容错搜索创建(用核心标题,让库自动补全这部番剧)
     try:
-        hit = mikan_client.search_best(folder)
+        hit = mikan_client.search_best(core or folder)
     except Exception as e:  # noqa: BLE001
         log.warning("库扫描:Mikan 搜索 %s 失败: %s", folder, e)
         return None
@@ -101,7 +113,8 @@ def _container_torrent(db, b: Bangumi) -> Torrent:
                            save_path=f"{settings.download_root}/{safe}")
         db.add(sub)
         db.flush()
-    guid = f"library:{b.mikan_bangumi_id}"
+    # mikan-less 番剧(BD 自动绑定从 bgm.tv 建,无蜜柑 ID)用 b<id> 兜底,避免多部都成 "library:None" 撞唯一键
+    guid = f"library:{b.mikan_bangumi_id or ('b' + str(b.id))}"
     t = db.execute(select(Torrent).where(Torrent.guid == guid)).scalar_one_or_none()
     if t is None:
         t = Torrent(subscription_id=sub.id, guid=guid,
@@ -215,6 +228,109 @@ def _reconcile_removed(db) -> int:
     return removed
 
 
+def _heal_bd_extras(db) -> int:
+    """全局自愈:有 BD 发行的番剧里、被误登记成正片的 BD 特典 → 移出剧集网格(不动磁盘文件)。
+
+    覆盖任意来源(qB 下载 / 库扫描 / 本地导入)与任意嵌套结构(如 .../短剧/…),与扫描顺序、
+    per-file source 无关。判据 = 该番剧有 BD 发行 且 文件名判为 BD 特典(纯集号正片不命中)。
+    特典本身仍由 BD 扫描就地收为 BdExtra,故只是从剧集网格摘除,不丢数据。
+    """
+    from app.services.postprocess import _apply_version_switch
+    bd_bangumi = set(db.execute(select(BdRelease.bangumi_id).where(
+        BdRelease.bangumi_id.isnot(None))).scalars())
+    if not bd_bangumi:
+        return 0
+    rows = db.execute(select(VideoFile).join(Torrent).join(Subscription).where(
+        Subscription.bangumi_id.in_(bd_bangumi), VideoFile.episode_id.isnot(None))).scalars().all()
+    removed = 0
+    touched: set[int] = set()
+    for vf in rows:
+        if bd_is_extra_video(PurePosixPath(vf.relative_path).name):
+            touched.add(vf.episode_id)
+            db.delete(vf)
+            removed += 1
+    if removed:
+        db.flush()
+        for ep_id in touched:
+            _apply_version_switch(db, ep_id)
+        log.info("库扫描:全局自愈移出 %s 个误登记为正片的 BD 特典", removed)
+    return removed
+
+
+def _scan_work(work_dir: Path, root: Path, create: bool = True) -> None:
+    """扫描一部作品目录:就地登记其视频、映射剧集、重算 active。
+    - 裸盘结构(BDMV/STREAM/VIDEO_TS)跳过;
+    - 若该目录是 BD 发行(夹名判为 BD),其特典子目录(NCOP/menu/SPs/CDs/扫描)里的视频交 BD
+      扫描归类为特典,不在此当剧集登记(避免重复 + 误顶正片);普通作品夹不跳,保留 Specials 等;
+    - create=False(容器下的 BD 发行)→ 只本地匹配番剧,匹配不到记为未匹配、不误建。"""
+    # BD 发行:夹名带 BD 标记 或 内容多数是 BD(中文作品名夹放 VCB 发行)
+    is_bd = detect_source(work_dir.name) == "BD" or is_bd_release_dir(work_dir)
+    vids, skipped = [], 0
+    for vp in work_dir.rglob("*"):
+        if not (vp.is_file() and media_probe.is_video(vp)):
+            continue
+        segs = vp.relative_to(work_dir).parts
+        if {seg.upper() for seg in segs} & _RAW_DISC_DIRS:
+            skipped += 1
+        elif is_bd and (any(is_extra_dir(seg) for seg in segs[:-1]) or bd_is_extra_video(vp.name)):
+            # BD 特典(子目录命名 或 文件名带描述标签)→ 交 BD 扫描,绝不当正片登记
+            skipped += 1
+        else:
+            vids.append(vp)
+    state["skipped"] += skipped
+    if skipped:
+        log.info("库扫描:%s 内跳过 %s 个裸盘/BD特典视频", work_dir.name, skipped)
+    if not vids:
+        return
+    folder_source = detect_source(work_dir.name)
+    with db_session() as db:
+        b = _match_or_create(db, work_dir.name, create=create)
+        if b is None and not create:
+            # BD 容器发行:本地标题匹配不到 → 认 BD 扫描里手动/自动绑定的番剧(两扫描器共认绑定)
+            rel_root = str(work_dir.relative_to(root)).replace("\\", "/")
+            rb = db.execute(select(BdRelease).where(
+                BdRelease.root_path == rel_root)).scalar_one_or_none()
+            if rb and rb.bangumi_id:
+                b = db.get(Bangumi, rb.bangumi_id)
+        if b is None:
+            state["unmatched"].append(work_dir.name)
+            return
+        t = _container_torrent(db, b)
+        n = upd = 0
+        touched_eps: set[int] = set()
+        # (误登记成正片的 BD 特典由扫描末尾 _heal_bd_extras 全局自愈,覆盖 qB/库/本地各来源)
+        for vp in vids:
+            rel = str(vp.relative_to(root)).replace("\\", "/")
+            # 逐文件再看其所在子目录(如 .../SPs/、.../BDRip/)叠加上下文片源
+            sub_source = detect_source("/".join(vp.relative_to(work_dir).parts[:-1]))
+            try:
+                r = _register_file(db, b, t, rel, vp, sub_source or folder_source)
+                if r == "added":
+                    n += 1
+                elif r == "updated":
+                    upd += 1
+                if r in ("added", "updated"):   # 仅本轮变动的集需重算 active
+                    eid = db.execute(select(VideoFile.episode_id).where(
+                        VideoFile.torrent_id == t.id,
+                        VideoFile.relative_path == rel)).scalar()
+                    if eid:
+                        touched_eps.add(eid)
+            except Exception as e:  # noqa: BLE001 — 单文件失败不拖垮整夹
+                log.warning("库扫描登记失败 %s: %s", vp, e)
+        state["registered"] += n
+        state["updated"] += upd
+        if n or upd or touched_eps:
+            if n or upd:
+                state["matched"].append(f"{b.title}: +{n}" + (f" ~{upd}" if upd else ""))
+            # 新增/更新/自愈移除后重算受影响集的 active,保证每集唯一最优(防多 active)
+            from app.services.postprocess import _apply_version_switch
+            for ep_id in touched_eps:
+                _apply_version_switch(db, ep_id)
+            # 生命周期:BD 正片就地登记可能令该番全 BD → 即时收尾(停扫/停订阅/删冗余 web)
+            from app.services.lifecycle import on_torrent_processed
+            on_torrent_processed(db, b.id)
+
+
 def _run() -> None:
     root = Path(settings.download_root_local)
     state.update(running=True, phase="扫描下载根目录", done=0, total=0, current="",
@@ -227,58 +343,15 @@ def _run() -> None:
         state["total"] = len(folders)
         for idx, folder in enumerate(folders, 1):
             state.update(done=idx, current=folder.name)
-            all_files = [p for p in folder.rglob("*") if p.is_file() and media_probe.is_video(p)]
-            # 裸盘(BDMV/STREAM、VIDEO_TS):整盘结构,不逐 m2ts 当集登记 → 跳过
-            vids, raw = [], 0
-            for vp in all_files:
-                parts = {seg.upper() for seg in vp.relative_to(folder).parts}
-                if parts & _RAW_DISC_DIRS:
-                    raw += 1
-                else:
-                    vids.append(vp)
-            state["skipped"] += raw
-            if raw:
-                log.info("库扫描:%s 内跳过 %s 个裸盘视频(BDMV/VIDEO_TS)", folder.name, raw)
-            if not vids:
-                continue
-            # 文件夹上下文片源:夹名整体看一遍(BDRip 合集夹 → 内部成片继承 BD)
-            folder_source = detect_source(folder.name)
             try:
-                with db_session() as db:
-                    b = _match_or_create(db, folder.name)
-                    if b is None:
-                        state["unmatched"].append(folder.name)
-                        continue
-                    t = _container_torrent(db, b)
-                    n = upd = 0
-                    touched_eps: set[int] = set()
-                    for vp in vids:
-                        rel = str(vp.relative_to(root)).replace("\\", "/")
-                        # 逐文件再看其所在子目录(如 .../SPs/、.../BDRip/)叠加上下文片源
-                        sub_source = detect_source("/".join(vp.relative_to(folder).parts[:-1]))
-                        try:
-                            r = _register_file(db, b, t, rel, vp, sub_source or folder_source)
-                            if r == "added":
-                                n += 1
-                            elif r == "updated":
-                                upd += 1
-                            if r in ("added", "updated"):   # 仅本轮变动的集需重算 active
-                                eid = db.execute(select(VideoFile.episode_id).where(
-                                    VideoFile.torrent_id == t.id,
-                                    VideoFile.relative_path == rel)).scalar()
-                                if eid:
-                                    touched_eps.add(eid)
-                        except Exception as e:  # noqa: BLE001 — 单文件失败不拖垮整夹
-                            log.warning("库扫描登记失败 %s: %s", vp, e)
-                    state["registered"] += n
-                    state["updated"] += upd
-                    if n or upd:
-                        state["matched"].append(
-                            f"{b.title}: +{n}" + (f" ~{upd}" if upd else ""))
-                        # 新增/更新文件后重算受影响集的 active,保证每集唯一最优(防多 active)
-                        from app.services.postprocess import _apply_version_switch
-                        for ep_id in touched_eps:
-                            _apply_version_switch(db, ep_id)
+                # 容器感知(与 BD 扫描同粒度):夹下有 BD 命名子目录 → 它是容器(BD 库目录/作品夹),
+                # 逐子目录当独立作品、仅本地匹配(不按发行夹名误建番剧);否则该夹本身就是一部作品。
+                subs = bd_subfolders(folder)
+                if subs:
+                    for sub in subs:
+                        _scan_work(sub, root, create=False)
+                else:
+                    _scan_work(folder, root, create=True)
             except Exception as e:  # noqa: BLE001
                 log.warning("库扫描处理 %s 失败: %s", folder.name, e)
                 state["unmatched"].append(f"{folder.name}(出错)")
@@ -286,7 +359,7 @@ def _run() -> None:
         state["phase"] = "比对已删文件"
         try:
             with db_session() as db:
-                state["removed"] = _reconcile_removed(db)
+                state["removed"] = _reconcile_removed(db) + _heal_bd_extras(db)
         except Exception as e:  # noqa: BLE001
             log.warning("库扫描反向比对失败: %s", e)
         log.info("番剧库扫描完成:新增 %s 更新 %s 移除 %s,匹配 %s 部,未匹配 %s",

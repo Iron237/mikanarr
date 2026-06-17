@@ -72,7 +72,13 @@ _CN_EP = re.compile(r"第\s*(\d{1,4}(?:\.\d)?)\s*[话話集]|[\[\s](\d{1,4}(?:\.
 # 分辨率
 _RESOLUTION = re.compile(r"(\d{3,4})[pP]\b|(?:1920|2560|3840)\s*[xX×]\s*(\d{3,4})|(4K)", re.I)
 # 片源:BD(蓝光,更具体先判)/ Web(网络流媒体平台)
-_SOURCE_BD = re.compile(r"BD-?Rip|BD-?MV|Blu-?Ray|\bBD(?:\d|\b)|REMUX|UHD-?BD", re.I)
+# 显式 BD 标记 + BD 专做组(VCB-Studio 等只压蓝光)+ 蓝光封装/profile 标记(Ma10p/Hi10p/
+# Hi444pp/Ma444 几乎不见于 Web-DL)。刻意不收「裸 10bit」——WebRip 也常 10bit,会误判 Web 为 BD。
+_SOURCE_BD = re.compile(
+    r"BD-?Rip|BD-?MV|Blu-?Ray|\bBD(?:\d|\b)|REMUX|UHD-?BD|"
+    r"VCB-?Studio|Beatrice-?Raws|Moozzi2|ANK-?Raws|Snow-?Raws|DBD-?Raws|\bjsum\b|"
+    r"(?<![A-Za-z])(?:Ma10p|Hi10p|Hi444pp|Ma444)(?![A-Za-z])",
+    re.I)
 _SOURCE_WEB = re.compile(
     r"WEB-?DL|WEB-?Rip|\bWEB\b|Baha|Bilibili|B-?Global|BGlobal|B站|哔哩|"
     r"Crunchyroll|\bCR\b|AMZN|Amazon|Netflix|\bNF\b|ABEMA|Sentai|Viu|iQIYI|爱奇艺|Funimation",

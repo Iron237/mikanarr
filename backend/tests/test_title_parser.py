@@ -72,6 +72,19 @@ def test_half_episode():
     assert p.episodes == [12.5]
 
 
+def test_source_bd_vcb_profile():
+    """VCB-Studio / Ma10p 这类无显式 BD 字样的蓝光压制 → 仍判 BD(才能顶替 Web)。"""
+    p = parse("[DMG&VCB-Studio] BOCCHI THE ROCK! [01][Ma10p_1080p][x265_flac].mkv")
+    assert p.source == "BD"
+    assert p.episodes == [1.0]
+
+
+def test_source_webrip_10bit_not_bd():
+    """WebRip 的 10bit 不能误判为 BD(否则会错误顶替/压过真 BD 排序)。"""
+    p = parse("[LoliHouse] 某番 - 05 [WebRip 1080p HEVC-10bit AAC].mkv")
+    assert p.source == "Web"
+
+
 def test_unparseable_low_confidence():
     p = parse("完全没有集数信息的一个标题")
     assert p.confidence <= 0.3

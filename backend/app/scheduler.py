@@ -41,11 +41,19 @@ def _drain_completed_job() -> None:
         log.info("补跑后处理:重新入队 %s 个 COMPLETED 种子", len(ids))
 
 
+def _lifecycle_job() -> None:
+    """每日:完结自动转补全 + 全 BD 完成收尾(Q1/Q2 兜底,即时触发见 postprocess/库扫描)。"""
+    from app.services.lifecycle import daily_reconcile
+    daily_reconcile()
+
+
 def start() -> None:
     scheduler.add_job(_rss_job, "interval", minutes=settings.poll_interval_min,
                       id="rss_poll", coalesce=True, max_instances=1)
     scheduler.add_job(_drain_completed_job, "interval", minutes=5,
                       id="drain_completed", coalesce=True, max_instances=1)
+    scheduler.add_job(_lifecycle_job, "interval", hours=24,
+                      id="lifecycle", coalesce=True, max_instances=1)
     if settings.auto_dl_interval_min and settings.auto_dl_interval_min > 0:
         scheduler.add_job(_auto_best_job, "interval", minutes=settings.auto_dl_interval_min,
                           id="auto_best", coalesce=True, max_instances=1)

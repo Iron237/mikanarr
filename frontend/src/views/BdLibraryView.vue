@@ -8,7 +8,6 @@ const releases = ref([])
 const bangumiList = ref([])
 const scan = ref(null)
 const filter = ref('all')          // all | owned | unowned | unbound
-const expanded = ref(new Set())
 let scanTimer = null
 let mounted = true
 
@@ -54,10 +53,6 @@ async function bind(r, e) {
 async function del(r) {
   if (!confirm(`移除 BD 记录「${r.title}」?(只删库记录,不动磁盘文件)`)) return
   await api.delete(`/api/bd/releases/${r.id}`); await reload()
-}
-function toggle(id) {
-  expanded.value.has(id) ? expanded.value.delete(id) : expanded.value.add(id)
-  expanded.value = new Set(expanded.value)
 }
 const SRC = { bdrip: ['BDRip', 'accent'], raw_disc: ['自购原盘', 'green'] }
 </script>
@@ -115,16 +110,12 @@ const SRC = { bdrip: ['BDRip', 'accent'], raw_disc: ['自购原盘', 'green'] }
             <button class="btn sm" :class="r.owned ? 'primary' : ''" @click="toggleOwned(r)">
               <Icon :name="r.owned ? 'check' : 'plus'" :size="13" /> {{ r.owned ? '已购买' : '标为已购买' }}
             </button>
-            <button v-if="r.extra_count" class="btn sm" @click="toggle(r.id)">
-              <Icon :name="expanded.has(r.id) ? 'chevron-down' : 'chevron-right'" :size="13" /> 特典
-            </button>
             <button class="btn sm danger" @click="del(r)"><Icon name="trash" :size="13" /> 移除</button>
           </div>
         </div>
       </div>
-      <div v-if="expanded.has(r.id)" style="margin-top: 12px;">
-        <BdReleases :releases="[r]" />
-      </div>
+      <!-- 特典:概要计数 + 按发行懒加载(BdReleases 内部展开才拉完整特典)-->
+      <BdReleases :releases="[r]" :show-header="false" />
     </div>
   </div>
 </template>

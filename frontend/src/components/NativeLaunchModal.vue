@@ -4,7 +4,8 @@ import { nativeState, markReady, launch, closeNative } from '../native'
 
 const router = useRouter()
 
-function downloadHandler() { window.location.href = '/api/launch/handler.bat' }
+// 带上当前访问地址 → 安装器把它写进浏览器免询问策略,根治每次播放弹窗
+function downloadHandler() { window.location.href = `/api/launch/handler.bat?origin=${encodeURIComponent(window.location.origin)}` }
 function installedAndOpen() { markReady(); const u = nativeState.pendingUrl; closeNative(); launch(u) }
 function tryAnyway() { const u = nativeState.pendingUrl; closeNative(); launch(u) }
 function goSettings() { closeNative(); router.push('/settings') }

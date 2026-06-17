@@ -69,7 +69,8 @@ async function downloadHandler() {
   busy.value = true; msg.value = ''
   try {
     await api.put('/api/config', { media_host_root: cfg.value.media_host_root, bd_owned_host_root: cfg.value.bd_owned_host_root })
-    window.location.href = '/api/launch/handler.bat'
+    // 带当前访问地址 → 安装器写浏览器免询问策略(根治每次播放弹窗)
+    window.location.href = `/api/launch/handler.bat?origin=${encodeURIComponent(window.location.origin)}`
   } catch (e) { msg.value = e.message } finally { busy.value = false }
 }
 
