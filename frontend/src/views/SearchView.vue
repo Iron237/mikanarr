@@ -303,7 +303,10 @@ onUnmounted(() => document.removeEventListener('click', closeMenu))
   .search-bar { flex-wrap: wrap; }
   .search-bar .input { flex: 1 1 100%; }
   .results { flex-direction: column; }
-  .poster-col { position: static; width: 100%; flex-direction: row; }
-  .poster-col img { width: 96px; }
+  /* 已选番剧:海报 + 标题在第一行,两个按钮换到下一行(别再被 width:100% 挤成竖排标题)*/
+  .poster-col { position: static; width: 100%; flex-direction: row; flex-wrap: wrap; align-items: center; }
+  .poster-col img { width: 80px; flex-shrink: 0; }
+  .poster-title { flex: 1 1 120px; min-width: 0; }
+  .poster-col .btn { width: auto !important; }
 }
 </style>
