@@ -52,6 +52,7 @@ EDITABLE: dict[str, tuple[str, type, bool]] = {
     # 原生启动(协议头播放/打开)
     "media_host_root": ("播放", str, False),
     "bd_owned_host_root": ("播放", str, False),
+    "data_host_root": ("播放", str, False),
     "powerdvd_path": ("播放", str, False),
     # AniDB(剧集级元数据)
     "anidb_enabled": ("AniDB", bool, False),

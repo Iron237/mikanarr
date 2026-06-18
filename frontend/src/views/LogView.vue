@@ -2,11 +2,12 @@
 import { onMounted, onUnmounted, ref } from 'vue'
 import { api } from '../api'
 import Icon from '../components/Icon.vue'
+import { requestNative } from '../native'
 
 const LEVELS = ['ALL', 'INFO', 'WARNING', 'ERROR', 'DEBUG']
 const level = ref('ALL')
 const lines = ref([])
-const archives = ref([])
+const logsDir = ref(null)   // { reveal_url, configured, archive_count }
 const paused = ref(false)
 let timer = null
 
@@ -20,9 +21,7 @@ async function refresh() {
 }
 function setLevel(l) { level.value = l; refresh() }
 
-async function loadArchives() {
-  try { archives.value = await api.get('/api/logs/archives') } catch { /* ignore */ }
-}
+function openLogDir() { if (logsDir.value?.reveal_url) requestNative(logsDir.value.reveal_url) }
 
 async function copyAll() {
   const text = lines.value.map(l =>
@@ -30,8 +29,9 @@ async function copyAll() {
   try { await navigator.clipboard.writeText(text) } catch { /* ignore */ }
 }
 
-onMounted(() => {
-  refresh(); loadArchives()
+onMounted(async () => {
+  refresh()
+  try { logsDir.value = await api.get('/api/logs/dir') } catch { /* ignore */ }
   timer = setInterval(refresh, 3000)
 })
 onUnmounted(() => clearInterval(timer))
@@ -66,13 +66,16 @@ onUnmounted(() => clearInterval(timer))
       <div v-if="!lines.length" class="muted" style="padding: 20px;">暂无日志</div>
     </div>
 
-    <div v-if="archives.length" class="card" style="margin-top: 14px;">
-      <h4 style="margin: 0 0 10px;">历史归档(重启时压缩,全部保留)</h4>
-      <div class="arch">
-        <a v-for="a in archives" :key="a" class="btn sm" :href="`/api/logs/archives/${a}`" download>
-          <Icon name="download" :size="13" /> {{ a }}
-        </a>
-      </div>
+    <div class="card logdir" style="margin-top: 14px;">
+      <Icon name="folder-open" :size="14" class="muted" />
+      <span class="muted">历史日志(重启时压缩,全部保留<span v-if="logsDir?.archive_count">,{{ logsDir.archive_count }} 个归档</span>)都在 log 目录里,按文件名时间排列。</span>
+      <div class="spacer" />
+      <button class="btn sm" :disabled="!logsDir?.reveal_url" title="在资源管理器中定位 log 目录" @click="openLogDir">
+        <Icon name="folder-open" :size="13" /> 打开 log 目录
+      </button>
+    </div>
+    <div v-if="logsDir && !logsDir.reveal_url" class="muted logdir-hint">
+      「打开 log 目录」需配置:设置 → 播放 填「data 目录宿主机根」并安装协议处理器(mikanarr://)后可一键打开。
     </div>
   </div>
 </template>
@@ -96,5 +99,6 @@ onUnmounted(() => clearInterval(timer))
 .ts { flex-shrink: 0; color: var(--text-dim); }
 .lg { flex-shrink: 0; color: #7aa2c4; max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .msg { flex: 1; }
-.arch { display: flex; flex-wrap: wrap; gap: 8px; }
+.logdir { display: flex; align-items: center; gap: 8px; padding: 10px 16px; font-size: 12.5px; }
+.logdir-hint { font-size: 12px; margin-top: 8px; }
 </style>

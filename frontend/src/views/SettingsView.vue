@@ -37,6 +37,7 @@ const LABELS = {
   auto_dl_interval_min: '定期智能扫描间隔(分钟,0=关闭)',
   media_host_root: '番剧库宿主机根(你电脑上看到的,如 Z:\\番剧\\mikanarr)',
   bd_owned_host_root: '已购原盘宿主机根(如 Z:\\BD\\已购BD翻录)',
+  data_host_root: 'data 目录宿主机根(用于「打开 log 目录」,如 C:\\mikanarr\\data\\mikanarr)',
   powerdvd_path: 'PowerDVD.exe 路径(留空 → 自动探测常见安装位)',
 }
 const GROUP_ORDER = ['常规', '智能下载', '下载器', '代理', '搜索源', '整理', '播放',

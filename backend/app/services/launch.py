@@ -72,6 +72,13 @@ def owned_host_path(rel_under_mount: str) -> str | None:
     return _join(settings.bd_owned_host_root, rel_under_mount)
 
 
+def data_host_path(rel: str = "") -> str | None:
+    """data 目录相对路径(相对 data_dir,如 'logs')→ 宿主机路径;未配置 data 根则 None。"""
+    if not settings.data_host_root:
+        return None
+    return _join(settings.data_host_root, rel)
+
+
 def launch_url(action: str, host_path: str | None) -> str | None:
     """构造 mikanarr://<action>?path=&token= 协议 URL;host_path 为空(未配置根)→ None。"""
     if not host_path:
@@ -97,7 +104,8 @@ def _handler_js() -> str:
     故整份 .js 是纯 ASCII,落盘无编码问题)。decodeURIComponent 正确还原中文路径。
     """
     import json
-    roots = [r for r in (settings.media_host_root, settings.bd_owned_host_root) if r]
+    roots = [r for r in (settings.media_host_root, settings.bd_owned_host_root,
+                         settings.data_host_root) if r]
     js = r'''var TOKEN = __TOKEN__;
 var ROOTS = __ROOTS__;
 var POWERDVD = __POWERDVD__;

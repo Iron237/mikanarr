@@ -6,6 +6,9 @@ import Icon from '../components/Icon.vue'
 const items = ref([])
 const filter = ref('all')      // all | airing | finished
 const srcFilter = ref('all')   // all | bd | bd_owned | bd_unowned | web
+const bdMenuOpen = ref(false)  // BD 片源下拉(已购/未购作为子菜单)
+const bdLabel = computed(() => srcFilter.value === 'bd_owned' ? 'BD·已购'
+  : srcFilter.value === 'bd_unowned' ? 'BD·未购' : 'BD')
 const keyword = ref('')
 const loading = ref(true)
 const scan = ref(null)       // 番剧库扫描状态
@@ -137,7 +140,7 @@ onUnmounted(() => { mounted = false; clearTimeout(scanTimer); clearTimeout(autoT
 
 <template>
   <div class="page">
-    <div class="row" style="margin-bottom: 18px; flex-wrap: wrap;">
+    <div class="row" style="margin-bottom: 10px; flex-wrap: wrap;">
       <div class="page-title" style="margin: 0;">番剧库</div>
       <div class="spacer" />
       <div class="search-wrap">
@@ -150,12 +153,6 @@ onUnmounted(() => { mounted = false; clearTimeout(scanTimer); clearTimeout(autoT
           {{ f[1] }}
         </button>
       </div>
-      <div class="filters">
-        <button v-for="f in [['all','全部源'],['bd','BD'],['bd_owned','BD·已购'],['bd_unowned','BD·未购'],['web','Web']]"
-                :key="f[0]" class="btn sm" :class="{ primary: srcFilter === f[0] }" @click="srcFilter = f[0]">
-          {{ f[1] }}
-        </button>
-      </div>
       <button class="btn sm" :disabled="scan?.running" @click="startScan"
               title="扫描下载根目录,把已摆好的视频就地识别进库(不移动文件)">
         <Icon name="scan" :size="14" /> {{ scan?.running ? '扫描中…' : '扫描番剧库' }}
@@ -163,6 +160,25 @@ onUnmounted(() => { mounted = false; clearTimeout(scanTimer); clearTimeout(autoT
       <button class="btn sm" :class="{ primary: manageMode }" @click="toggleManage">
         <Icon :name="manageMode ? 'check' : 'edit'" :size="14" /> {{ manageMode ? '完成' : '管理' }}
       </button>
+    </div>
+
+    <!-- 第二行:片源筛选(BD 的已购/未购作为 BD 按钮的下拉子菜单)-->
+    <div class="row src-row">
+      <div class="filters">
+        <button class="btn sm" :class="{ primary: srcFilter === 'all' }" @click="srcFilter = 'all'">全部源</button>
+        <div class="bd-filter" @mouseleave="bdMenuOpen = false">
+          <button class="btn sm" :class="{ primary: ['bd', 'bd_owned', 'bd_unowned'].includes(srcFilter) }"
+                  @click="bdMenuOpen = !bdMenuOpen">
+            {{ bdLabel }} <Icon name="chevron-down" :size="12" />
+          </button>
+          <div v-if="bdMenuOpen" class="bd-menu">
+            <button v-for="o in [['bd','全部 BD'],['bd_owned','已购'],['bd_unowned','未购']]" :key="o[0]"
+                    class="bd-menu-item" :class="{ on: srcFilter === o[0] }"
+                    @click="srcFilter = o[0]; bdMenuOpen = false">{{ o[1] }}</button>
+          </div>
+        </div>
+        <button class="btn sm" :class="{ primary: srcFilter === 'web' }" @click="srcFilter = 'web'">Web</button>
+      </div>
     </div>
 
     <div v-if="scan" class="scan-bar card">
@@ -394,7 +410,20 @@ onUnmounted(() => { mounted = false; clearTimeout(scanTimer); clearTimeout(autoT
 .score { color: var(--accent); flex-shrink: 0; }
 .studio { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 11.5px; }
 .empty { text-align: center; padding: 60px; color: var(--text-dim); }
-.filters { display: flex; gap: 6px; }
+.filters { display: flex; gap: 6px; flex-wrap: wrap; }
+.src-row { margin-top: -4px; margin-bottom: 18px; }
+.bd-filter { position: relative; display: inline-flex; }
+.bd-menu {
+  position: absolute; top: calc(100% + 4px); left: 0; z-index: 20; min-width: 104px;
+  background: var(--bg-card); border: 1px solid var(--border); border-radius: 8px; padding: 4px;
+  display: flex; flex-direction: column; box-shadow: 0 6px 18px rgba(0,0,0,.3);
+}
+.bd-menu-item {
+  text-align: left; padding: 5px 10px; font-size: 12.5px; border: none; background: transparent;
+  color: var(--text); border-radius: 6px; cursor: pointer;
+}
+.bd-menu-item:hover { background: rgba(255,255,255,.05); }
+.bd-menu-item.on { color: var(--accent); }
 
 @media (max-width: 768px) {
   .grid { grid-template-columns: repeat(auto-fill, minmax(108px, 1fr)); gap: 10px; }
