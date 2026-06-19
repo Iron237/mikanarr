@@ -13,9 +13,9 @@ services:
       # 构建期 apt/pip 默认用清华镜像直连(见 Dockerfile ARG,可覆盖)
     container_name: mikanarr
     ports:
-      # 临时:8008 被 Windows winnat 动态保留(7914-8013)占用,改用 8014;
+      # 临时:8008/8014 都落在 Windows winnat 动态保留段(7930-8029)内,改用 8080;
       # 恢复 8008:管理员跑 `net stop winnat & net start winnat` 后改回 "8008:8008" 再 up -d
-      - "8014:8008"
+      - "8080:8008"
     environment:
       MIKANARR_PROXY_URL: ${PROXY_URL:-}
       MIKANARR_TMDB_API_KEY: ${TMDB_API_KEY:-}
