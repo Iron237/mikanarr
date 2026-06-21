@@ -20,6 +20,45 @@ const cfg = ref({
 })
 const dlHealth = ref('')
 
+// 导入配置:从备份 JSON 还原番剧库 + 设置 + 通知(不含本机存储/下载器连接,仍需在向导配)
+const cfgFileInput = ref(null)
+const importing = ref(false)
+const importMsg = ref('')
+const importOk = ref(false)
+function pickConfigFile() { importMsg.value = ''; cfgFileInput.value?.click() }
+
+async function refreshCfg() {
+  try {
+    const c = await api.get('/api/config')
+    for (const k of Object.keys(cfg.value)) if (c[k]) cfg.value[k] = c[k].secret ? '' : c[k].value
+  } catch { /* ignore */ }
+}
+
+async function onConfigFile(e) {
+  const file = e.target.files?.[0]
+  e.target.value = ''                       // 允许重选同一文件
+  if (!file) return
+  importOk.value = false
+  let data
+  try { data = JSON.parse(await file.text()) }
+  catch { importMsg.value = '文件解析失败(不是有效 JSON 备份)'; return }
+  if (!data || data.format !== 'mikanarr-backup') {
+    importMsg.value = '不是 Mikanarr 备份文件(format 不匹配)'; return
+  }
+  const hasSettings = !!data.settings || !!(data.tables && data.tables.notification_config)
+  const extra = hasSettings ? ',并还原设置 / 通知(API key / cookie / 偏好,不含本机存储与下载器连接)' : ''
+  if (!window.confirm(`导入会用备份覆盖当前的番剧库 / 订阅 / 剧集 / 下载记录 / 文件路径${extra}。确定继续?`)) return
+  importing.value = true; importMsg.value = '导入中…'
+  try {
+    const r = await api.post('/api/backup/import', data)
+    await refreshCfg()                      // 反映已应用的设置(如 TMDB key)
+    importOk.value = true
+    importMsg.value = `导入完成:共写入 ${r.total} 条${r.settings_applied ? `(含设置 ${r.settings_applied} 项)` : ''}。`
+      + '接着配好本机存储与下载器即可完成。'
+  } catch (e) { importMsg.value = '导入失败:' + e.message }
+  finally { importing.value = false }
+}
+
 onMounted(async () => {
   try {
     const c = await api.get('/api/config')
@@ -97,7 +136,15 @@ async function finish() {
 <template>
   <div class="setup-wrap">
     <div class="setup-card card">
-      <div class="brand">🍊 Mikanarr · 首次配置</div>
+      <div class="head">
+        <div class="brand">🍊 Mikanarr · 首次配置</div>
+        <button class="btn import-btn" :disabled="importing || busy" @click="pickConfigFile"
+          title="从备份 JSON 还原番剧库与设置(本机存储 / 下载器仍需在向导里配)">
+          <Icon name="download" :size="13" /> {{ importing ? '导入中…' : '导入配置' }}
+        </button>
+        <input ref="cfgFileInput" type="file" accept=".json,application/json" style="display:none" @change="onConfigFile" />
+      </div>
+      <p v-if="importMsg" class="import-msg" :class="importOk ? 'ok' : 'err'">{{ importMsg }}</p>
       <div class="steps">
         <span v-for="(s, i) in STEPS" :key="s" class="step" :class="{ on: i === step, done: i < step }">
           <b>{{ i + 1 }}</b> {{ s }}
@@ -203,7 +250,10 @@ async function finish() {
 <style scoped>
 .setup-wrap { min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 24px; }
 .setup-card { width: 100%; max-width: 560px; padding: 26px 28px; }
-.brand { font-size: 18px; font-weight: 800; letter-spacing: .5px; margin-bottom: 16px; }
+.head { display: flex; align-items: center; gap: 10px; margin-bottom: 16px; }
+.brand { font-size: 18px; font-weight: 800; letter-spacing: .5px; }
+.import-btn { margin-left: auto; font-size: 12.5px; padding: 6px 11px; flex: none; }
+.import-msg { font-size: 12.5px; line-height: 1.55; margin: -6px 0 14px; }
 .steps { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 18px; }
 .step { font-size: 12px; color: var(--text-dim); display: inline-flex; align-items: center; gap: 4px;
   padding: 3px 9px; border-radius: 20px; border: 1px solid var(--border); }
