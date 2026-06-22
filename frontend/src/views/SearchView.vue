@@ -1,5 +1,6 @@
 <script setup>
-import { computed, onMounted, onUnmounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { api, fmtSize } from '../api'
 import SubscribeWizard from '../components/SubscribeWizard.vue'
 import Icon from '../components/Icon.vue'
@@ -20,6 +21,8 @@ const torrents = ref([])
 const showRaw = ref(false)
 const wizardPreset = ref(null)
 const sourceOpen = ref(false)
+const route = useRoute()
+const router = useRouter()
 
 // 分面筛选
 const active = ref({ group: new Set(), resolution: new Set(), lang: new Set() })
@@ -63,30 +66,52 @@ function pickSource(id) {
   source.value = id; sourceOpen.value = false; resetResults()
 }
 
-async function search() {
+// 用户动作只推路由;真正的拉取在 applyRoute(URL = 单一真相源,前进/后退自动还原)。
+// 输入过程不改 URL,仅提交搜索 / 选番剧时各 push 一条历史 → 返回键逐层退、链接可分享直达。
+function search() {
   if (!keyword.value.trim()) return
+  router.push({ path: '/search', query: { source: source.value, searchstr: keyword.value.trim() } })
+}
+function pickSeries(s) {
+  router.push({ path: '/search',
+    query: { source: 'mikan', searchstr: keyword.value, bangumi: s.mikan_bangumi_id } })
+}
+function backToSeries() {
+  router.push({ path: '/search', query: { source: source.value, searchstr: keyword.value } })
+}
+
+async function runSearch(kw, src) {
   loading.value = true; error.value = ''; resetResults()
   try {
     const data = await api.get(
-      `/api/search/multi?source=${source.value}&keyword=${encodeURIComponent(keyword.value)}`)
+      `/api/search/multi?source=${src}&keyword=${encodeURIComponent(kw)}`)
     series.value = data.series || []
     torrents.value = data.torrents || []
   } catch (e) { error.value = e.message }
   loading.value = false
 }
-
-async function pickSeries(s) {
+async function runPickSeries(bid) {
   loading.value = true; error.value = ''
+  series.value = []; currentSeries.value = null; torrents.value = []; clearFacets()
   try {
-    const data = await api.get(`/api/search/multi?source=mikan&bangumi_id=${s.mikan_bangumi_id}`)
+    const data = await api.get(`/api/search/multi?source=mikan&bangumi_id=${bid}`)
     currentSeries.value = data.current_series
     torrents.value = data.torrents || []
-    clearFacets()
   } catch (e) { error.value = e.message }
   loading.value = false
 }
-
-function backToSeries() { currentSeries.value = null; torrents.value = []; clearFacets() }
+async function applyRoute() {
+  const q = route.query
+  const kw = (q.searchstr || '').toString()
+  const src = (q.source || 'mikan').toString()
+  const bid = q.bangumi ? Number(q.bangumi) : null
+  source.value = src
+  keyword.value = kw
+  if (!kw) { resetResults(); return }
+  if (bid) await runPickSeries(bid)
+  else await runSearch(kw, src)
+}
+watch(() => route.fullPath, applyRoute)
 
 async function copyLink(t) {
   const link = t.magnet || t.torrent_url || t.page_url
@@ -94,7 +119,7 @@ async function copyLink(t) {
 }
 
 function closeMenu() { sourceOpen.value = false }
-onMounted(() => document.addEventListener('click', closeMenu))
+onMounted(() => { document.addEventListener('click', closeMenu); applyRoute() })
 onUnmounted(() => document.removeEventListener('click', closeMenu))
 </script>
 

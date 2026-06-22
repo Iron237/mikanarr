@@ -50,6 +50,7 @@ def library(db: Session = Depends(get_db)):
             .where(Subscription.bangumi_id == b.id, VideoFile.is_active.is_(True))
             .limit(1)).first()),
         "eps_downloaded": _eps_done(db, b),
+        "eps_aired": _eps_aired(db, b),
         "has_bd": _has_source(db, b.id, "BD"),
         "has_web": _has_source(db, b.id, "Web"),
         # 封面墙右下角「源」角标:原盘(自购)优先,其次正片已全替为 BDrip
@@ -93,6 +94,44 @@ def _eps_done(db: Session, b: Bangumi) -> int:
     return min(n, b.eps_total) if b.eps_total else n
 
 
+def _weekly_aired(air_date: str | None) -> int:
+    """按首播日 + 周更推算已播出集数(无每集播出日时的兜底)。未开播 → 0。"""
+    if not air_date:
+        return 0
+    from datetime import date
+    try:
+        start = date.fromisoformat(air_date[:10].replace("/", "-"))
+    except ValueError:
+        return 0
+    days = (date.today() - start).days
+    return days // 7 + 1 if days >= 0 else 0
+
+
+def _eps_aired(db: Session, b: Bangumi) -> int | None:
+    """已播/已发布集数(真实更新情况):取该番**所有种子**(含 SKIPPED 留痕)`parsed_json`
+    解析出的最大正片集号 = 真实「种子已出到第几集」;没见过种子时按首播日 + 周更推算。封顶到总集数。
+
+    仅 TV 且有总集数才有「已播集」概念;算不出(无种子且无首播日)→ None(前端退回只显已下载)。
+    SKIPPED 种子不建 torrent_episode 映射,故必须读 parsed_json 而非 Episode 表。
+    """
+    if not b.eps_total or b.kind != Kind.TV:
+        return None
+    seen = 0
+    rows = db.execute(
+        select(Torrent.parsed_json).join(Subscription, Torrent.subscription_id == Subscription.id)
+        .where(Subscription.bangumi_id == b.id)).scalars().all()
+    for pj in rows:
+        for e in (pj or {}).get("episodes") or []:
+            try:
+                seen = max(seen, int(float(e)))
+            except (TypeError, ValueError):
+                continue
+    if seen == 0:
+        seen = _weekly_aired(b.air_date)
+    seen = max(seen, _eps_done(db, b))   # 已下载的集必然已播 → 下限,杜绝「已播 < 已下载」
+    return min(seen, b.eps_total) if seen > 0 else None
+
+
 def _has_source(db: Session, bangumi_id: int, source: str) -> bool:
     """该番剧是否有指定片源的 active 文件;BD 还认 BD 发行记录(BD 收藏扫描登记的)。"""
     if source == "BD" and db.execute(select(BdRelease.id).where(
@@ -122,6 +161,7 @@ def calendar(db: Session = Depends(get_db)):
             "id": b.id, "title": b.title, "poster": _poster_url(b),
             "score": b.score, "eps_total": b.eps_total,
             "eps_downloaded": _eps_done(db, b),
+            "eps_aired": _eps_aired(db, b),
         }
         if b.air_weekday is not None:
             days[b.air_weekday].append(entry)

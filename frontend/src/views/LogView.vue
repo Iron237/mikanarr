@@ -1,5 +1,5 @@
 <script setup>
-import { onMounted, onUnmounted, ref } from 'vue'
+import { nextTick, onMounted, onUnmounted, ref } from 'vue'
 import { api } from '../api'
 import Icon from '../components/Icon.vue'
 import { requestNative } from '../native'
@@ -9,17 +9,30 @@ const level = ref('ALL')
 const lines = ref([])
 const logsDir = ref(null)   // { reveal_url, configured, archive_count }
 const paused = ref(false)
+const logbox = ref(null)
+let stick = true            // 终端式跟随底部;用户上滚查看旧日志时暂停跟随,滚回底部恢复
 let timer = null
 
 const levelClass = { INFO: 'lv-info', WARNING: 'lv-warn', ERROR: 'lv-err', DEBUG: 'lv-dbg' }
+
+function onScroll() {
+  const el = logbox.value
+  if (el) stick = el.scrollTop + el.clientHeight >= el.scrollHeight - 40
+}
+function scrollToBottom() {
+  const el = logbox.value
+  if (el) el.scrollTop = el.scrollHeight
+}
 
 async function refresh() {
   if (paused.value) return
   try {
     lines.value = await api.get(`/api/logs?level=${level.value}&limit=800`)
+    await nextTick()
+    if (stick) scrollToBottom()
   } catch { /* 忽略 */ }
 }
-function setLevel(l) { level.value = l; refresh() }
+function setLevel(l) { level.value = l; stick = true; refresh() }   // 切级别回到最新
 
 function openLogDir() { if (logsDir.value?.reveal_url) requestNative(logsDir.value.reveal_url) }
 
@@ -56,7 +69,7 @@ onUnmounted(() => clearInterval(timer))
       <span class="muted" style="font-size: 12px;">{{ lines.length }} 条</span>
     </div>
 
-    <div class="logbox">
+    <div ref="logbox" class="logbox" @scroll="onScroll">
       <div v-for="(l, i) in lines" :key="i" class="logline">
         <span class="lv" :class="levelClass[l.level]">{{ l.level }}</span>
         <span class="ts">{{ new Date(l.ts).toLocaleTimeString('zh-CN') }}</span>

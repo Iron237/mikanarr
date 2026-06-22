@@ -25,10 +25,13 @@ let autoTimer = null
 let mounted = true
 
 const SEASON_ORDER = { '秋': 4, '夏': 3, '春': 2, '冬': 1 }
+// 有未下载的已播集(连载番=有新集 / 完结番=缺集)
+const hasNew = (b) => b.eps_aired != null && b.eps_aired > b.eps_downloaded
 
 const groups = computed(() => {
   let list = items.value
-  if (filter.value !== 'all') list = list.filter(b => b.airing_status === filter.value)
+  if (filter.value === 'updates') list = list.filter(b => b.eps_aired != null && b.eps_aired > b.eps_downloaded)
+  else if (filter.value !== 'all') list = list.filter(b => b.airing_status === filter.value)
   const sf = srcFilter.value
   if (sf === 'bd') list = list.filter(b => b.has_bd)
   else if (sf === 'bd_owned') list = list.filter(b => b.has_bd && b.bd_owned)
@@ -148,7 +151,7 @@ onUnmounted(() => { mounted = false; clearTimeout(scanTimer); clearTimeout(autoT
         <input v-model="keyword" class="input search-box" placeholder="搜索标题 / 制作公司" />
       </div>
       <div class="filters">
-        <button v-for="f in [['all','全部'],['airing','连载中'],['finished','已完结']]" :key="f[0]"
+        <button v-for="f in [['all','全部'],['airing','连载中'],['finished','已完结'],['updates','有更新']]" :key="f[0]"
                 class="btn sm" :class="{ primary: filter === f[0] }" @click="filter = f[0]">
           {{ f[1] }}
         </button>
@@ -269,7 +272,10 @@ onUnmounted(() => { mounted = false; clearTimeout(scanTimer); clearTimeout(autoT
             <span v-if="b.bd_owned" class="src-badge owned" title="自购原盘(收藏,跳 PowerDVD)">原盘BD</span>
             <span v-else-if="b.bd_rip" class="src-badge rip" title="正片已替换为 BDrip">BDrip</span>
             <!-- TV 显示集进度;剧场版/OVA 不是集概念 → 显示形态分类(已入库/未入库) -->
-            <div class="ep-badge" v-if="b.kind === 'tv' && b.eps_total">{{ b.eps_downloaded }}/{{ b.eps_total }}</div>
+            <div class="ep-badge" v-if="b.kind === 'tv' && b.eps_total" :class="{ 'has-new': hasNew(b) }"
+                 :title="b.eps_aired != null ? `已播 ${b.eps_aired}/${b.eps_total},已下载 ${b.eps_downloaded}` : `已下载 ${b.eps_downloaded}/${b.eps_total}`">
+              <span v-if="hasNew(b)" class="nd" />{{ b.eps_aired != null ? b.eps_aired : b.eps_downloaded }}/{{ b.eps_total }}
+            </div>
             <div class="ep-badge kind" v-else-if="b.kind && b.kind !== 'tv'" :class="{ dim: !b.has_resource }">
               {{ b.kind === 'movie' ? '剧场版' : 'OVA' }}{{ b.has_resource ? '' : '·未入库' }}
             </div>
@@ -395,6 +401,11 @@ onUnmounted(() => { mounted = false; clearTimeout(scanTimer); clearTimeout(autoT
 }
 .ep-badge.kind { color: var(--blue); font-weight: 700; }
 .ep-badge.kind.dim { color: var(--text-dim); }
+.ep-badge.has-new { color: #fff; }
+.ep-badge .nd {
+  display: inline-block; width: 6px; height: 6px; border-radius: 50%;
+  background: var(--red, #e5484d); margin-right: 4px; vertical-align: middle;
+}
 .src-badge {
   position: absolute; bottom: 0; left: 0; font-size: 11px; font-weight: 700;
   padding: 2px 8px; border-top-right-radius: 8px; background: rgba(0,0,0,.75);

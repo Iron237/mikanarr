@@ -33,8 +33,15 @@ onMounted(async () => {
             <img v-if="b.poster" :src="b.poster" loading="lazy" />
             <div class="cal-info">
               <div class="cal-title">{{ b.title }}</div>
-              <div class="muted" style="font-size: 11px;">
-                {{ b.eps_downloaded }}{{ b.eps_total ? '/' + b.eps_total : '' }} 集
+              <div class="muted cal-eps">
+                <template v-if="b.eps_aired != null">
+                  已播 {{ b.eps_aired }}{{ b.eps_total ? '/' + b.eps_total : '' }}
+                  · 有 {{ b.eps_downloaded }}
+                  <span v-if="b.eps_aired > b.eps_downloaded" class="new-ep" title="有未下载的新集">● 新集</span>
+                </template>
+                <template v-else>
+                  {{ b.eps_downloaded }}{{ b.eps_total ? '/' + b.eps_total : '' }} 集
+                </template>
                 <span v-if="b.score" style="color: var(--accent);">★{{ b.score }}</span>
               </div>
             </div>
@@ -74,6 +81,8 @@ onMounted(async () => {
   font-size: 12.5px; font-weight: 600;
   display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
 }
+.cal-eps { font-size: 11px; display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
+.new-ep { color: var(--red, #e5484d); font-weight: 700; font-size: 10.5px; }
 @media (max-width: 768px) {
   .week { grid-template-columns: 1fr 1fr; }
 }
