@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { api } from '../api'
 
 const data = ref(null)
@@ -15,9 +15,13 @@ const ordered = computed(() => {
   })
 })
 
-onMounted(async () => {
-  data.value = await api.get('/api/bangumi/calendar/week')
-})
+async function load() {
+  try { data.value = await api.get('/api/bangumi/calendar/week') } catch { /* 忽略,保留上次 */ }
+}
+// 标签页重新可见时刷新:番剧库新发现的集(RSS/智能下载扫到)即时反映,免手动重载
+function onVisible() { if (document.visibilityState === 'visible') load() }
+onMounted(() => { load(); document.addEventListener('visibilitychange', onVisible) })
+onUnmounted(() => document.removeEventListener('visibilitychange', onVisible))
 </script>
 
 <template>

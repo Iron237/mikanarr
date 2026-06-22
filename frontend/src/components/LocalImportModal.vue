@@ -88,7 +88,7 @@ onUnmounted(() => { clearTimeout(pollTimer); clearTimeout(scanTimer) })
         来源两种:<b>本机磁盘</b>(.env <code>LOCAL_IMPORT_PATH</code> → <code>/import</code>)、
         <b>NAS</b>(.env <code>NAS_IMPORT_PATH</code> → <code>/import-nas</code>)。
         可直接粘贴 Windows 路径(<code>G:\Anime\X</code>)或 NAS 路径(<code>\\192.168.2.4\…\X</code>),
-        系统会自动翻译到对应挂载点。
+        系统会自动转换到对应目录。
       </p>
 
       <div class="row" style="margin-bottom: 12px; flex-wrap: wrap;">

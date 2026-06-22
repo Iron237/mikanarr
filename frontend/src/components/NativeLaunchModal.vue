@@ -18,7 +18,7 @@ function goSettings() { closeNative(); router.push('/settings') }
         <h3 style="margin-bottom: 10px;">原生播放未配置</h3>
         <p class="muted" style="font-size: 13px; line-height: 1.7;">
           要在本机用默认播放器播放 / 在资源管理器打开,需先在 <strong>设置 → 播放</strong> 填写
-          <strong>宿主机路径前缀</strong>(这台电脑看 NAS 的路径,如 <code>Z:\番剧\mikanarr</code>),
+          <strong>文件夹路径</strong>(这台电脑看 NAS 的路径,如 <code>Z:\番剧\mikanarr</code>),
           再下载并双击运行协议处理器。
         </p>
         <div class="row" style="justify-content: flex-end; margin-top: 16px;">

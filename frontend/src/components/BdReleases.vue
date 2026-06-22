@@ -60,7 +60,7 @@ async function toggleDiscs(r) {
       <span v-if="r.source_kind === 'bdrip'" class="muted bd-hint">特典(扫描 / CD / 映像特典)在发行目录内,用本机应用浏览</span>
     </div>
     <div v-if="!r.open_url" class="muted bd-hint2">
-      未配置「番剧库宿主机根」— 在 设置 → 播放 填写并安装协议处理器后可一键打开
+      未配置「番剧库文件夹路径」— 在 设置 → 播放 填写并安装协议处理器后可一键打开
     </div>
 
     <!-- 自购原盘:逐碟 PowerDVD(懒加载)-->
@@ -79,10 +79,10 @@ async function toggleDiscs(r) {
           </button>
         </div>
         <div v-if="!discs[r.id][0].bd_url" class="muted bd-hint2">
-          未配置「已购原盘宿主机根」— 在 设置 → 播放 填写并安装协议处理器后可一键播放
+          未配置「已购原盘文件夹路径」— 在 设置 → 播放 填写并安装协议处理器后可一键播放
         </div>
       </template>
-      <div v-else class="muted bd-hint">未发现可播放的碟结构(BDMV),或目录未挂载。</div>
+      <div v-else class="muted bd-hint">未发现可播放的碟结构(BDMV),或目录未连接。</div>
     </div>
   </div>
 </template>

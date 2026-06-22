@@ -35,9 +35,9 @@ const LABELS = {
   auto_dl_sub_lang: '字幕语言要求(简中 = 必须含简体)',
   auto_dl_prefer_bd: '片源优先 BD > Web(并把已有 Web 升级为 BD)',
   auto_dl_interval_min: '定期智能扫描间隔(分钟,0=关闭)',
-  media_host_root: '番剧库宿主机根(你电脑上看到的,如 Z:\\番剧\\mikanarr)',
-  bd_owned_host_root: '已购原盘宿主机根(如 Z:\\BD\\已购BD翻录)',
-  data_host_root: 'data 目录宿主机根(用于「打开 log 目录」,如 C:\\mikanarr\\data\\mikanarr)',
+  media_host_root: '番剧库文件夹路径(你电脑上看到的,如 Z:\\番剧\\mikanarr)',
+  bd_owned_host_root: '已购原盘文件夹路径(如 Z:\\BD\\已购BD翻录)',
+  data_host_root: 'data 目录路径(用于「打开 log 目录」,如 C:\\mikanarr\\data\\mikanarr)',
   powerdvd_path: 'PowerDVD.exe 路径(留空 → 自动探测常见安装位)',
 }
 const GROUP_ORDER = ['常规', '智能下载', '下载器', '代理', '搜索源', '整理', '播放',
@@ -196,10 +196,10 @@ async function testStorage() {
   } catch (e) { storMsg.value = '失败:' + e.message } finally { storBusy.value = false }
 }
 async function saveStorage() {
-  storBusy.value = true; storMsg.value = '保存并挂载中…'
+  storBusy.value = true; storMsg.value = '保存并连接中…'
   try {
     await api.post('/api/setup/storage', stor.value)
-    storMsg.value = '已保存并挂载'
+    storMsg.value = '已保存并连接'
     await loadStorage()
   } catch (e) { storMsg.value = '失败:' + e.message } finally { storBusy.value = false }
 }
@@ -306,7 +306,7 @@ onMounted(() => { load(); loadStorage(); loadVersion() })
       <div class="row" style="margin-bottom: 10px;">
         <h3 style="margin: 0; font-size: 15px;">存储</h3>
         <span v-if="storState" class="tag" :class="storState.mounted ? 'green' : 'red'">
-          {{ storState.mounted ? '已挂载' : '未挂载' }}
+          {{ storState.mounted ? '已连接' : '未连接' }}
         </span>
         <span v-if="storState?.error" class="muted" style="font-size: 12px; color: var(--red);">{{ storState.error }}</span>
         <div class="spacer" />
@@ -314,7 +314,7 @@ onMounted(() => { load(); loadStorage(); loadVersion() })
       </div>
       <div class="row" style="gap: 10px; margin-bottom: 10px;">
         <label class="row" style="gap: 5px; cursor: pointer;"><input type="radio" value="smb" v-model="stor.mode" /> NAS / SMB</label>
-        <label class="row" style="gap: 5px; cursor: pointer;"><input type="radio" value="local" v-model="stor.mode" /> 本地 / Docker 路径</label>
+        <label class="row" style="gap: 5px; cursor: pointer;"><input type="radio" value="local" v-model="stor.mode" /> 本地目录</label>
       </div>
       <div v-if="stor.mode === 'smb'" class="cfg-grid">
         <label class="cfg-field"><span>共享地址(//主机/共享)</span><input class="input" v-model="stor.smb_host_path" placeholder="//192.168.1.100/anime/mikanarr" /></label>
@@ -322,11 +322,11 @@ onMounted(() => { load(); loadStorage(); loadVersion() })
         <label class="cfg-field"><span>用户名</span><input class="input" v-model="stor.smb_username" /></label>
         <label class="cfg-field"><span>密码(留空=不改)</span><input class="input" type="password" v-model="stor.smb_password" placeholder="留空保留原密码" /></label>
       </div>
-      <p v-else class="muted" style="font-size: 12.5px;">使用容器内 <code>/downloads</code>(由 compose 绑定提供)。</p>
+      <p v-else class="muted" style="font-size: 12.5px;">使用默认下载目录 <code>/downloads</code>。</p>
       <div class="row" style="gap: 10px; margin-top: 10px;">
         <button class="btn sm" :disabled="storBusy" @click="testStorage">测试连接</button>
-        <button class="btn primary sm" :disabled="storBusy" @click="saveStorage">保存并挂载</button>
-        <span class="muted" style="font-size: 12px;">挂载需容器 cap_add: SYS_ADMIN(发行 compose 已带)</span>
+        <button class="btn primary sm" :disabled="storBusy" @click="saveStorage">保存并连接</button>
+        <span class="muted" style="font-size: 12px;">连接 NAS 所需的容器权限,发行版镜像已自带</span>
       </div>
     </div>
 
@@ -360,10 +360,10 @@ onMounted(() => { load(); loadStorage(); loadVersion() })
         详情页的「播放 / 打开目录」「PowerDVD」按钮通过自定义协议
         <code>mikanarr://</code> 在你本机拉起默认播放器 / 资源管理器 / PowerDVD。
         处理器是 Windows 自带的 JScript(经 <code>wscript</code> 运行,<strong>无窗口闪、无需 PowerShell/Python</strong>)。
-        用法:先在上方<strong>「播放」</strong>填好宿主机路径前缀,下载下面的安装包<strong>在该 Windows
+        用法:先在上方<strong>「播放」</strong>填好这些文件夹路径,下载下面的安装包<strong>在该 Windows
         电脑上双击运行</strong>一次(certutil 解码 + 注册协议,无常驻进程、无需管理员)。
         首次点击时浏览器会问一次「打开 Mikanarr?」,勾<strong>「始终允许」</strong>后即免提示。
-        路径或前缀变更后重新下载安装即可。仅在装了处理器的本机有效,手机/其他设备无效。
+        路径变更后重新下载安装即可。仅在装了处理器的本机有效,手机/其他设备无效。
       </p>
       <div class="row" style="margin-top: 10px;">
         <button class="btn primary sm" @click="downloadHandler">

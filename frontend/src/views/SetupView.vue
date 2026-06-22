@@ -154,10 +154,10 @@ async function finish() {
       <!-- 0 存储 -->
       <div v-if="step === 0" class="body">
         <h3>媒体存储</h3>
-        <p class="muted">番剧文件存在哪?App 会在容器内挂载它,用于识别/探测/管理(qB 下载路径在下一步单独配)。</p>
+        <p class="muted">番剧文件存在哪?App 会读取它,用于识别/探测/管理(qB 下载路径在下一步单独配)。</p>
         <div class="row seg">
           <label :class="{ on: st.mode === 'smb' }"><input type="radio" value="smb" v-model="st.mode" /> NAS / SMB 共享</label>
-          <label :class="{ on: st.mode === 'local' }"><input type="radio" value="local" v-model="st.mode" /> 本地 / Docker 路径</label>
+          <label :class="{ on: st.mode === 'local' }"><input type="radio" value="local" v-model="st.mode" /> 本地目录</label>
         </div>
         <template v-if="st.mode === 'smb'">
           <label class="fld"><span>共享地址</span><input class="input" v-model="st.smb_host_path" placeholder="//192.168.1.100/anime/mikanarr" /></label>
@@ -167,7 +167,7 @@ async function finish() {
           </div>
           <label class="fld" style="max-width:160px;"><span>SMB 版本</span><input class="input" v-model="st.smb_vers" placeholder="3.0" /></label>
         </template>
-        <p v-else class="muted">将使用容器内 <code>/downloads</code>(由 compose 默认绑定的本地目录提供)。</p>
+        <p v-else class="muted">将使用默认的下载目录 <code>/downloads</code>。</p>
         <div class="row" style="gap:10px;">
           <button class="btn" :disabled="busy" @click="testStorage"><Icon name="check" :size="13" /> 测试连接</button>
           <span v-if="stTest" :class="stTest.ok ? 'ok' : 'err'" style="font-size:12.5px;">
@@ -185,7 +185,7 @@ async function finish() {
           <label class="fld"><span>后端</span>
             <select class="input" v-model="cfg.downloader"><option value="qb">qBittorrent</option><option value="bitcomet">BitComet</option></select>
           </label>
-          <label class="fld"><span>下载写盘根(qB 视角)</span><input class="input" v-model="cfg.download_root" placeholder="/downloads 或 NAS 路径" /></label>
+          <label class="fld"><span>下载保存目录(qB 写入的路径)</span><input class="input" v-model="cfg.download_root" placeholder="/downloads 或 NAS 路径" /></label>
           <label class="fld"><span>地址</span><input class="input" v-model="cfg.qb_host" /></label>
           <label class="fld"><span>端口</span><input class="input" type="number" v-model.number="cfg.qb_port" /></label>
           <label class="fld"><span>用户名</span><input class="input" v-model="cfg.qb_username" /></label>
@@ -200,7 +200,7 @@ async function finish() {
       <!-- 2 代理 -->
       <div v-else-if="step === 2" class="body">
         <h3>代理</h3>
-        <p class="muted">国内访问蜜柑 / bgm.tv / TMDB / Telegram 基本都需要代理;容器内访问宿主代理用 <code>host.docker.internal</code>。不用代理可留空。</p>
+        <p class="muted">国内访问蜜柑 / bgm.tv / TMDB / Telegram 基本都需要代理;容器内访问本机代理填 <code>host.docker.internal</code>。不用代理可留空。</p>
         <label class="fld"><span>代理地址</span><input class="input" v-model="cfg.proxy_url" placeholder="http://host.docker.internal:10808" /></label>
       </div>
 
@@ -215,10 +215,10 @@ async function finish() {
       <!-- 4 原生播放(可跳) -->
       <div v-else-if="step === 4" class="body">
         <h3>原生播放(可跳过)</h3>
-        <p class="muted">想用本机默认播放器播放、在资源管理器打开、PowerDVD 放蓝光?填这台电脑看 NAS 的<strong>路径前缀</strong>,
+        <p class="muted">想用本机默认播放器播放、在资源管理器打开、PowerDVD 放蓝光?填这台电脑看 NAS 的<strong>文件夹路径</strong>,
           再下载协议处理器在本机双击装一次。不需要可跳过,以后在设置页随时配。</p>
-        <label class="fld"><span>番剧库宿主机根(如 Z:\番剧\mikanarr)</span><input class="input" v-model="cfg.media_host_root" placeholder="Z:\番剧\mikanarr" /></label>
-        <label class="fld"><span>已购原盘宿主机根(可选,如 Z:\BD\已购BD翻录)</span><input class="input" v-model="cfg.bd_owned_host_root" placeholder="可留空" /></label>
+        <label class="fld"><span>番剧库文件夹路径(如 Z:\番剧\mikanarr)</span><input class="input" v-model="cfg.media_host_root" placeholder="Z:\番剧\mikanarr" /></label>
+        <label class="fld"><span>已购原盘文件夹路径(可选,如 Z:\BD\已购BD翻录)</span><input class="input" v-model="cfg.bd_owned_host_root" placeholder="可留空" /></label>
         <div class="row" style="gap:10px;">
           <button class="btn" :disabled="busy || !cfg.media_host_root" @click="downloadHandler">保存并下载协议处理器(.bat)</button>
           <span class="muted" style="font-size:12px;">下载后在这台 Windows 双击运行一次</span>
