@@ -116,24 +116,21 @@ def test_manual_delete_not_revived(db, sub):
     assert rss_engine.reevaluate_skipped(db, sub) == 0
 
 
-def test_resume_resubmits_submit_failed(db, sub, monkeypatch):
-    """提交失败(无 info_hash)的种子点重试 → 走重新提交而非 qB resume(否则必 409)。"""
+def test_resume_resubmits_submit_failed(db, sub):
+    """提交失败(无 info_hash)的种子点重试 → 异步排队重新提交(而非 qB resume,否则必 409)。"""
+    from fastapi import BackgroundTasks
+
     from app.api import tasks
     t = Torrent(subscription_id=sub.id, guid="g-sf", title_raw="测试番剧 - 05",
                 torrent_url="http://x/g-sf.torrent", status=TorrentStatus.SUBMIT_FAILED,
                 parsed_json={})
     db.add(t)
     db.flush()
-    called = {}
-
-    def fake_submit(db_, sub_, tor_):
-        called["id"] = tor_.id
-        tor_.status = TorrentStatus.DOWNLOADING
-
-    monkeypatch.setattr("app.services.rss_engine._submit", fake_submit)
-    tasks.resume(t.id, db)
-    assert called.get("id") == t.id
-    assert t.status == TorrentStatus.DOWNLOADING
+    bg = BackgroundTasks()
+    tasks.resume(t.id, bg, db)
+    assert len(bg.tasks) == 1
+    assert bg.tasks[0].func is tasks._resubmit_in_background
+    assert bg.tasks[0].args == (t.id,)
 
 
 def test_add_torrent_idempotent_on_409(monkeypatch):

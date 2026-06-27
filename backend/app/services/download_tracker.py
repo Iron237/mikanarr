@@ -65,8 +65,13 @@ def _emit(event: str, torrent) -> None:
     emit(event, torrent)
 
 
-def _check_dead(db, t, lt) -> bool:
-    """坏种检测:无做种 + 0 速 持续超过阈值 → 移除 + 标记 + 触发换备选源。返回是否已处理为坏种。"""
+def _check_dead(db, t, lt, swap_subs: list[int]) -> bool:
+    """坏种检测:无做种 + 0 速 持续超过阈值 → 移除 + 标记 + 排队换备选源。返回是否已处理为坏种。
+
+    换源(reevaluate_skipped → _submit,含 Mikan 下载 + qB 提交的网络 I/O)不在此处做,
+    只把订阅 id 收集到 swap_subs,由 _sync_once 在本轮 db_session(写锁)释放后另开会话处理,
+    避免持 SQLite 写锁期间做长网络 I/O 阻塞其它写(API / RSS 轮询)。
+    """
     if not settings.dead_torrent_enabled:
         t.stalled_since = None
         return False
@@ -78,7 +83,7 @@ def _check_dead(db, t, lt) -> bool:
         if now - t.stalled_since < timedelta(hours=settings.dead_torrent_hours):
             return False
         # 判定坏种
-        from app.services.rss_engine import DEAD_SKIP_REASON, reevaluate_skipped
+        from app.services.rss_engine import DEAD_SKIP_REASON
         try:
             downloader.delete(t.info_hash, delete_files=True)
         except Exception:  # noqa: BLE001
@@ -89,10 +94,8 @@ def _check_dead(db, t, lt) -> bool:
         log.info("坏种自动清理 #%s %s", t.id, t.title_raw[:50])
         _emit("on_fail", t)
         db.flush()
-        try:
-            reevaluate_skipped(db, t.subscription)   # 自动换一个备选源
-        except Exception as e:  # noqa: BLE001
-            log.warning("坏种换源失败 #%s: %s", t.id, e)
+        if t.subscription_id is not None and t.subscription_id not in swap_subs:
+            swap_subs.append(t.subscription_id)   # 换源延到锁外做
         return True
     if t.stalled_since is not None:
         t.stalled_since = None
@@ -130,6 +133,7 @@ def _check_stall(db, t, lt) -> bool:
 def _sync_once() -> tuple[list[dict], bool]:
     """同步一轮:回写快照 + 状态迁移。返回 (广播数据, 是否有活动任务)。"""
     to_enqueue: list[int] = []          # 后处理入队延到 commit 之后(见函数尾)
+    swap_subs: list[int] = []           # 坏种换源(网络 I/O)延到锁外做
     with db_session() as db:
         rows = db.execute(select(Torrent).where(Torrent.status.in_(
             [TorrentStatus.DOWNLOADING, TorrentStatus.COMPLETED,
@@ -165,8 +169,8 @@ def _sync_once() -> tuple[list[dict], bool]:
                     t.progress_at = None
                 elif _check_stall(db, t, lt):
                     pass            # 无进度已自动暂停
-                elif _check_dead(db, t, lt):
-                    pass            # 坏种已自动清理/换源,本轮不再计为活动
+                elif _check_dead(db, t, lt, swap_subs):
+                    continue        # 已清理为 SKIPPED:跳过陈旧快照回写与广播,本轮不计活动
                 else:
                     active = True
             elif t.status == TorrentStatus.DOWNLOAD_ERROR and lt is not None and not lt.error:
@@ -204,6 +208,17 @@ def _sync_once() -> tuple[list[dict], bool]:
         from app.services.postprocess import enqueue
         for tid in to_enqueue:
             enqueue(tid)
+    # 坏种换源在写锁释放后另开短会话做(_submit 的网络 I/O 不再阻塞其它写)
+    for sub_id in swap_subs:
+        try:
+            with db_session() as db:
+                from app.models import Subscription
+                from app.services.rss_engine import reevaluate_skipped
+                sub = db.get(Subscription, sub_id)
+                if sub:
+                    reevaluate_skipped(db, sub)
+        except Exception as e:  # noqa: BLE001 — 换源失败不影响跟踪
+            log.warning("坏种换源失败 sub=%s: %s", sub_id, e)
     return result
 
 

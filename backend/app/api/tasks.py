@@ -1,7 +1,7 @@
 """下载任务查询与控制(P1:查询+基本控制;P3 接 WebSocket 实时)。"""
 import logging
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -12,6 +12,20 @@ from app.schemas import TorrentOut
 
 log = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/tasks", tags=["tasks"])
+
+
+def _resubmit_in_background(task_id: int) -> None:
+    """后台重新提交(提交失败的种子点重试):_submit 含 Mikan 下载 + qB 提交的网络 I/O,
+    放后台跑,避免阻塞 HTTP 响应(网络故障时单次可达上百秒)。自带独立会话。"""
+    from app.database import db_session
+    from app.services.rss_engine import _submit
+    try:
+        with db_session() as db:
+            t = db.get(Torrent, task_id)
+            if t and t.subscription:
+                _submit(db, t.subscription, t)
+    except Exception:  # noqa: BLE001
+        log.warning("后台重新提交失败 task=%s", task_id, exc_info=True)
 
 
 @router.get("", response_model=list[TorrentOut])
@@ -71,7 +85,7 @@ def retry_postprocess(task_id: int, db: Session = Depends(get_db)):
 
 
 @router.post("/batch")
-def batch(payload: dict, db: Session = Depends(get_db)):
+def batch(payload: dict, background: BackgroundTasks, db: Session = Depends(get_db)):
     """批量操作下载任务。payload: {ids:[...], action:'pause'|'resume'|'delete', delete_files?:bool}。
     delete 对无 info_hash 的任务也能处理(仅标记 DB SKIPPED),不像单条接口会 409。"""
     ids = payload.get("ids") or []
@@ -101,8 +115,7 @@ def batch(payload: dict, db: Session = Depends(get_db)):
                     t.status = TorrentStatus.DOWNLOADING   # 恢复无进度暂停/错误 → 重新跟踪
                     t.error_message = None
             elif action == "resume" and t.status == TorrentStatus.SUBMIT_FAILED and t.subscription:
-                from app.services.rss_engine import _submit   # 重试提交失败的种子 = 重新提交
-                _submit(db, t.subscription, t)
+                background.add_task(_resubmit_in_background, t.id)   # 重试提交失败=异步重新提交
             done.append(tid)
         except Exception:  # noqa: BLE001 — 单条失败不阻断其余
             log.warning("批量 %s 失败 task=%s", action, tid, exc_info=True)
@@ -121,7 +134,7 @@ def pause(task_id: int, db: Session = Depends(get_db)):
 
 
 @router.post("/{task_id}/resume", status_code=204)
-def resume(task_id: int, db: Session = Depends(get_db)):
+def resume(task_id: int, background: BackgroundTasks, db: Session = Depends(get_db)):
     t = db.get(Torrent, task_id)
     if not t:
         raise HTTPException(404)
@@ -129,9 +142,7 @@ def resume(task_id: int, db: Session = Depends(get_db)):
     # (前端对 submit_failed / download_error 共用 resume 按钮;不修则 submit_failed 必 409)
     if not t.info_hash:
         if t.status == TorrentStatus.SUBMIT_FAILED and t.subscription:
-            from app.services.rss_engine import _submit
-            _submit(db, t.subscription, t)
-            db.commit()
+            background.add_task(_resubmit_in_background, task_id)   # 异步,避免阻塞响应
             return
         raise HTTPException(409, "任务未提交到 qB(无 info_hash)")
     downloader.resume(t.info_hash)

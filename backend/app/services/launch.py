@@ -121,6 +121,10 @@ for (var i = 0; i < parts.length; i++) {
   if (k === "path") { path = v; } else if (k === "token") { token = v; }
 }
 if (token !== TOKEN || !path) { WScript.Quit(2); }
+var fso = new ActiveXObject("Scripting.FileSystemObject");
+// resolve ".." before the whitelist test, else "root\..\elsewhere" passes the prefix
+// check yet Windows opens the escaped path (whitelist bypass / path traversal).
+try { path = fso.GetAbsolutePathName(path); } catch (e) { WScript.Quit(4); }
 var pl = path.toLowerCase(), ok = false;
 for (var j = 0; j < ROOTS.length; j++) {
   var r = ROOTS[j].toLowerCase().replace(/[\\]+$/, "");
@@ -129,7 +133,6 @@ for (var j = 0; j < ROOTS.length; j++) {
 if (!ok) { WScript.Quit(3); }
 var sh = new ActiveXObject("Shell.Application");
 var wsh = new ActiveXObject("WScript.Shell");
-var fso = new ActiveXObject("Scripting.FileSystemObject");
 function findPowerDVD() {
   var bases = [wsh.ExpandEnvironmentStrings("%ProgramFiles%") + "\\CyberLink",
                wsh.ExpandEnvironmentStrings("%ProgramFiles(x86)%") + "\\CyberLink"];

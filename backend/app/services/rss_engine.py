@@ -136,12 +136,20 @@ def process_item(db: Session, sub: Subscription, item: RssItem) -> Torrent | Non
     torrent.status = TorrentStatus.PENDING
     db.add(torrent)
     db.flush()
-    _auto_detect_offset(db, sub, parsed)
-    for ep in _ensure_episodes(db, sub.bangumi_id, _effective_episodes(sub, parsed.episodes)):
-        db.add(TorrentEpisode(torrent_id=torrent.id, episode_id=ep.id))
-    db.flush()
-
     from app.services.events import emit
+    try:
+        _auto_detect_offset(db, sub, parsed)
+        for ep in _ensure_episodes(db, sub.bangumi_id, _effective_episodes(sub, parsed.episodes)):
+            db.add(TorrentEpisode(torrent_id=torrent.id, episode_id=ep.id))
+        db.flush()
+    except Exception as e:  # noqa: BLE001 — 建集失败别让种子永久卡 PENDING(无回收路径,重试可救)
+        log.warning("建剧集失败 #%s: %s", torrent.id, e)
+        torrent.status = TorrentStatus.SUBMIT_FAILED
+        torrent.error_message = f"建剧集失败: {e}"
+        db.flush()
+        emit("on_fail", torrent)
+        return torrent
+
     emit("on_new", torrent)
     _submit(db, sub, torrent)
     return torrent
